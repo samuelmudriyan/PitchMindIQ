@@ -142,7 +142,7 @@ export default function PitchMindApp() {
       const data = await resp.json();
       setLoadingProgress(90);
    if (data?.success) {
-  const fullUrl = `http://localhost:5000${data.videoUrl}`;
+  const fullUrl = `${API_URL.replace('/api', '')}${data.videoUrl}`;
   const fileName = data.videoId || data.videoUrl.split("/").pop();
   setUploadedFileName(fileName);
   setVideoUrl(fullUrl);
