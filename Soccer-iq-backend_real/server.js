@@ -349,12 +349,16 @@ function runPythonTracker(videoPath, playerPosition) {
         return reject(new Error(`Python script failed with code ${code}`));
       }
       
-      try {
-        const result = JSON.parse(stdout);
-        resolve(result);
-      } catch (e) {
-        reject(new Error(`Failed to parse Python output: ${e.message}`));
-      }
+    try {
+  // Extract only the JSON part (last line should be the JSON output)
+  const lines = stdout.trim().split('\n');
+  const jsonLine = lines[lines.length - 1];
+  const result = JSON.parse(jsonLine);
+  resolve(result);
+} catch (e) {
+  console.error('Raw Python output:', stdout);
+  reject(new Error(`Failed to parse Python output: ${e.message}`));
+}
     });
     
     python.on('error', (err) => {
