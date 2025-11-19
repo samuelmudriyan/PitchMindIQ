@@ -17,7 +17,7 @@ class SoccerBallTracker:
         self.model = YOLO('yolov8n.pt')
         
         self.decision_points = []
-        self.THREE_YARDS_PIXELS = 100  # Approximate - will calibrate based on field size
+        self.THREE_YARDS_PIXELS = 250  # Approximate - will calibrate based on field size
         
     def calculate_distance(self, point1, point2):
         """Euclidean distance between two points"""
