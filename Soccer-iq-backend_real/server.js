@@ -13,7 +13,7 @@ const multer = require("multer");
 const ffmpeg = require("fluent-ffmpeg");
 const { execSync } = require("child_process");
 const Anthropic = require("@anthropic-ai/sdk");
-const { spawn } = require('child_process');
+const { execSync, spawn } = require("child_process");
 
 const PORT = Number(process.env.PORT || 5000);
 const ORIGINS = (process.env.CORS_ORIGINS || "http://localhost:3000")
@@ -244,8 +244,6 @@ app.post("/api/analyze-player", async (req, res) => {
     res.status(500).json({ error: "Analysis failed" });
   }
 });
-
-const { spawn } = require('child_process');
 
 app.post("/api/analyze-video", async (req, res) => {
   console.log("========================================");
