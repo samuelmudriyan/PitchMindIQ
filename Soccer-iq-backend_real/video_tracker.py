@@ -14,7 +14,7 @@ class SoccerBallTracker:
         
         # Load YOLO model (will download on first run)
         print("Loading YOLO model...", file=sys.stderr)
-        self.model = YOLO('yolov8n.pt', verbose=False)
+        self.model = YOLO('yolov8n.pt')
         
         self.decision_points = []
         self.THREE_YARDS_PIXELS = 250  # Approximate - will calibrate based on field size
