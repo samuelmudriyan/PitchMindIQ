@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Upload, CheckCircle, Trophy, User, Target, MousePointer } from "lucide-react";
 
-const API_URL = "http://localhost:5000/api";
+const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
 
 function Toast({ message, onClose }) {
   useEffect(() => {
