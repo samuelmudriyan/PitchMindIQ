@@ -398,7 +398,7 @@ ANALYZE:
 - Why maximize goals?
 - Tactical principle?
 
-3️⃣ CREATE QUIZ (Frame 2):
+3️⃣ CREATE QUIZ (Frame 3):
 - Option A: Optimal (90-100 pts)
 - Option B: Decent (75-85 pts)
 - Option C: Poor (60-70 pts)
