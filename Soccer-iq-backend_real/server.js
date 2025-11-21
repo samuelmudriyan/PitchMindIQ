@@ -143,9 +143,16 @@ async function extractFrame(videoPath, timestamp) {
   return { timestamp: ts, path: outPath, url: `/uploads/frames/${fname}` };
 }
 
+
 // 🔥 NEW: Call Modal GPU for video tracking
 async function callModalGPU(videoPath, playerX, playerY, filename) {
-  const videoUrl = `${process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:' + PORT}/uploads/videos/${path.basename(videoPath)}`;
+  // Construct video URL with proper scheme
+  const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
+  const baseUrl = domain 
+    ? (domain.startsWith('http') ? domain : `https://${domain}`)
+    : `http://localhost:${PORT}`;
+  
+  const videoUrl = `${baseUrl}/uploads/videos/${path.basename(videoPath)}`;
   
   console.log(`🚀 Calling Modal GPU...`);
   console.log(`Video URL: ${videoUrl}`);
