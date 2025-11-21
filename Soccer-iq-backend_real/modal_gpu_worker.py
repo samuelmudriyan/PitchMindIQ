@@ -11,15 +11,27 @@ from typing import List, Dict
 stub = modal.Stub("pitchmind-gpu-tracker")
 
 # Define the GPU environment with all dependencies
+# Define the GPU environment with all dependencies
 gpu_image = (
     modal.Image.debian_slim()
+    .apt_install(
+        "libgl1-mesa-glx",
+        "libglib2.0-0",
+        "libsm6",
+        "libxext6",
+        "libxrender-dev",
+        "libgomp1",
+        "ffmpeg"
+    )
     .pip_install(
-        "ultralytics==8.0.196",
-        "opencv-python-headless==4.8.1.78",
-        "torch==2.1.0",
-        "torchvision==0.16.0",
-        "numpy==1.24.3",
-        "Pillow==10.0.1"
+        "ultralytics",
+        "opencv-python-headless",
+        "torch",
+        "torchvision",
+        "numpy",
+        "Pillow",
+        "requests",
+        "fastapi"
     )
 )
 
