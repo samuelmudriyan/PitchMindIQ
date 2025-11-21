@@ -20,9 +20,16 @@ const ORIGINS = (process.env.CORS_ORIGINS || "http://localhost:3000")
   .map((s) => s.trim())
   .filter(Boolean);
 
+// 🚀 MODAL GPU ENDPOINT
+const MODAL_ENDPOINT = process.env.MODAL_ENDPOINT || "https://meatyhd6--pitchmind-gpu-tracker-fastapi-app.modal.run";
+
 if (!process.env.ANTHROPIC_API_KEY) {
   console.error("Missing ANTHROPIC_API_KEY");
   process.exit(1);
+}
+
+if (!MODAL_ENDPOINT) {
+  console.warn("⚠️  WARNING: MODAL_ENDPOINT not set - GPU processing disabled");
 }
 
 const app = express();
@@ -67,7 +74,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 500 * 1024 * 1024 },
+  limits: { fileSize: 5 * 1024 * 1024 * 1024 }, // 5GB limit
   fileFilter: (req, file, cb) => {
     const ok = ["video/mp4", "video/webm", "video/quicktime", "video/x-matroska"].includes(file.mimetype);
     ok ? cb(null, true) : cb(new Error("Unsupported video type"));
@@ -117,7 +124,7 @@ async function extractFrame(videoPath, timestamp) {
   const fname = `frame_${ts.toFixed(2)}s_${Date.now()}_${crypto.randomUUID()}.jpg`;
   const outPath = path.join(FRAMES_DIR, fname);
   
-  // 🔧 CREATE THE DIRECTORY IF IT DOESN'T EXIST
+  // Create the directory if it doesn't exist
   if (!fs.existsSync(FRAMES_DIR)) {
     fs.mkdirSync(FRAMES_DIR, { recursive: true });
     console.log(`📁 Created frames directory: ${FRAMES_DIR}`);
@@ -136,44 +143,252 @@ async function extractFrame(videoPath, timestamp) {
   return { timestamp: ts, path: outPath, url: `/uploads/frames/${fname}` };
 }
 
-async function identifyPlayer(framePath, position) {
-  try {
-    const base64Image = (await fsp.readFile(framePath)).toString("base64");
-    const prompt = `TARGET x=${Number(position.x).toFixed(1)}%, y=${Number(position.y).toFixed(1)}%
-Only describe the player closest to that point. Return JSON:
-{"description":"150+ chars","jerseyColor":"desc","jerseyNumber":"number or null","skinTone":"desc","hairStyle":"desc","bodyBuild":"desc","team":"Left team/Right team","distinctiveFeatures":"desc"}`;
-    return await callClaudeJson({ base64Image, prompt, maxTokens: 800 });
-  } catch (e) {
-    console.error("identifyPlayer:", e.message);
-    return null;
+// 🔥 NEW: Call Modal GPU for video tracking
+async function callModalGPU(videoPath, playerX, playerY, filename) {
+  const videoUrl = `${process.env.RAILWAY_PUBLIC_DOMAIN || 'http://localhost:' + PORT}/uploads/videos/${path.basename(videoPath)}`;
+  
+  console.log(`🚀 Calling Modal GPU...`);
+  console.log(`Video URL: ${videoUrl}`);
+  
+  const response = await fetch(MODAL_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      video_url: videoUrl,
+      player_x: playerX,
+      player_y: playerY,
+      filename: filename
+    })
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Modal API error: ${response.status} - ${errorText}`);
   }
+  
+  const result = await response.json();
+  
+  if (!result.success) {
+    throw new Error(result.error || 'Modal GPU processing failed');
+  }
+  
+  return result;
 }
 
-async function trackPlayerInFrame(framePath, lastPosition, playerDescription) {
+app.get("/api/health", (_req, res) => {
+  res.json({ 
+    status: "ok",
+    modalConfigured: !!MODAL_ENDPOINT,
+    modalEndpoint: MODAL_ENDPOINT ? "configured" : "missing"
+  });
+});
+
+app.post("/api/test-elite", (req, res) => {
+  console.log("🔥🔥🔥 TEST ENDPOINT HIT 🔥🔥🔥");
+  console.log("Body:", req.body);
+  res.json({ test: "success", body: req.body });
+});
+
+app.post("/api/upload-video", upload.single("video"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No video" });
+  return res.json({ 
+    success: true, 
+    videoId: req.file.filename, 
+    videoUrl: `/uploads/videos/${req.file.filename}` 
+  });
+});
+
+app.post("/api/analyze-player", async (req, res) => {
   try {
-    const base64Image = (await fsp.readFile(framePath)).toString("base64");
-    const prompt = `Track player: jersey=${playerDescription?.jerseyColor||"?"} ${playerDescription?.jerseyNumber?("#"+playerDescription.jerseyNumber):""}, team=${playerDescription?.team||"?"}, features=${playerDescription?.distinctiveFeatures||"?"}. Last x=${lastPosition.x.toFixed(1)}%, y=${lastPosition.y.toFixed(1)}%.
-
-CRITICAL: Only mark hasBall as TRUE if the ball is within 1 yard (approximately 1 meter) of the player's feet. The player must be in active control or about to touch the ball.
-
-Return JSON:
-{"playerFound":true/false,"position":{"x":number,"y":number},"hasBall":true/false,"confidence":0-100,"tacticalPosition":"role","fieldThird":"Defensive/Middle/Attacking","distanceFromLastPosition":"meters","reason":"brief"}`;
-    
-    const json = await callClaudeJson({ base64Image, prompt, maxTokens: 1200 });
-    const dx = Math.abs((json.position?.x ?? lastPosition.x) - lastPosition.x);
-    const dy = Math.abs((json.position?.y ?? lastPosition.y) - lastPosition.y);
-    if (Math.hypot(dx, dy) > 30 && json.confidence > 60) json.confidence = Math.max(30, json.confidence - 20);
-    
-    // If confidence is low, mark as not found
-    if (json.confidence < 40) {
-      json.playerFound = false;
+    const { videoPath, timestamp, playerPosition, tacticalPosition } = req.body || {};
+    if (!videoPath || typeof timestamp !== "number" || !playerPosition) {
+      return res.status(400).json({ error: "Missing parameters" });
     }
     
-    return json;
+    const abs = path.isAbsolute(videoPath) ? videoPath : path.join(VIDEOS_DIR, path.basename(videoPath));
+    const frame = await extractFrame(abs, timestamp);
+    const analysis = await analyzeFrame(frame.path, playerPosition, tacticalPosition || "Unknown");
+    
+    res.json({ success: true, timestamp, frameUrl: frame.url, analysis });
   } catch (e) {
-    console.error("trackPlayerInFrame:", e.message);
-    return { playerFound: false, position: lastPosition, hasBall: false, confidence: 0, tacticalPosition: "Unknown", fieldThird: "Unknown" };
+    console.error("analyze-player:", e);
+    res.status(500).json({ error: "Analysis failed" });
   }
+});
+
+// 🔥 UPDATED: Analyze video with Modal GPU
+app.post("/api/analyze-video", async (req, res) => {
+  console.log("========================================");
+  console.log("📹 MODAL GPU - ANALYZE VIDEO");
+  
+  try {
+    const { videoPath, playerPosition } = req.body || {};
+    
+    if (!videoPath || !playerPosition) {
+      return res.status(400).json({ error: "Missing parameters" });
+    }
+    
+    const abs = path.join(VIDEOS_DIR, path.basename(videoPath));
+    
+    if (!fs.existsSync(abs)) {
+      return res.status(400).json({ error: "Video file not found" });
+    }
+    
+    const filename = path.basename(abs);
+    
+    console.log("Video:", abs);
+    console.log("Player position:", playerPosition);
+    
+    // Get video duration for validation
+    const duration = await getVideoDuration(abs);
+    const durationMinutes = Math.floor(duration / 60);
+    
+    console.log(`Duration: ${durationMinutes}m ${Math.floor(duration % 60)}s`);
+    
+    // Warn if video is very long
+    if (duration > 1800) {  // 30 minutes
+      return res.status(400).json({
+        error: 'Video too long',
+        message: `This video is ${durationMinutes} minutes long. Please upload clips under 30 minutes.`
+      });
+    }
+    
+    // Call Modal GPU for tracking
+    console.log('🎮 Sending to Modal GPU...');
+    const gpuResults = await callModalGPU(abs, playerPosition.x, playerPosition.y, filename);
+    
+    console.log(`✅ Modal found ${gpuResults.decision_points.length} decision points`);
+    console.log(`GPU used: ${gpuResults.processing_info?.gpu_used || 'Unknown'}`);
+    
+    if (gpuResults.decision_points.length === 0) {
+      return res.json({
+        success: false,
+        error: "No decision points found in this video."
+      });
+    }
+    
+    // Limit to 5 decision points for Claude analysis
+    const selected = gpuResults.decision_points.slice(0, 5);
+    
+    console.log(`🧠 Analyzing ${selected.length} decision points with Claude...`);
+    
+    const analyses = [];
+    
+    for (let i = 0; i < selected.length; i++) {
+      const point = selected[i];
+      
+      console.log(`Analyzing point ${i + 1}/${selected.length} at ${point.timestamp}s`);
+      
+      // Extract frame at decision point
+      const frameDuring = await extractFrame(abs, point.timestamp);
+      
+      // Analyze with Claude
+      const analysis = await analyzeDecisionPoint(
+        frameDuring.path,
+        {
+          x: point.player_position[0] / gpuResults.video_metadata.width * 100,
+          y: point.player_position[1] / gpuResults.video_metadata.height * 100
+        },
+        point.zone
+      );
+      
+      analyses.push({
+        timestamp: point.timestamp,
+        frameUrl: frameDuring.url,
+        playerPosition: {
+          x: point.player_position[0] / gpuResults.video_metadata.width * 100,
+          y: point.player_position[1] / gpuResults.video_metadata.height * 100
+        },
+        zone: point.zone,
+        analysis: analysis
+      });
+      
+      // Add delay to avoid rate limits
+      if (i < selected.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+    
+    console.log("✅ COMPLETE!");
+    console.log("========================================");
+    
+    res.json({
+      success: true,
+      totalDecisionPoints: gpuResults.decision_points.length,
+      analyses: analyses,
+      videoMetadata: gpuResults.video_metadata,
+      processingInfo: gpuResults.processing_info
+    });
+    
+  } catch (e) {
+    console.error("❌ Error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Helper: Analyze a single decision point with Claude
+async function analyzeDecisionPoint(framePath, playerPosition, zone) {
+  const base64Image = (await fsp.readFile(framePath)).toString("base64");
+  
+  const prompt = `You are an elite soccer tactical analyst.
+
+PLAYER: Position x=${playerPosition.x.toFixed(1)}%, y=${playerPosition.y.toFixed(1)}%
+FIELD ZONE: ${zone}
+
+The player has just received or is about to receive the ball. Analyze this decision moment.
+
+Return JSON:
+{
+  "situation": "Brief tactical situation (150-200 chars)",
+  "playerRole": "Inferred tactical role",
+  "fieldLocation": "${zone}",
+  "pressureLevel": "Low/Medium/High",
+  "keySpaces": "Available space and options",
+  "optimalDecision": {
+    "action": "Best possible action",
+    "reasoning": "Why this is optimal",
+    "principle": "Tactical principle"
+  },
+  "options": [
+    {
+      "text": "Option A - detailed description",
+      "points": 90-100,
+      "feedback": "Tactical feedback",
+      "isOptimal": true
+    },
+    {
+      "text": "Option B - detailed description",
+      "points": 75-85,
+      "feedback": "Why this is decent but not optimal"
+    },
+    {
+      "text": "Option C - detailed description",
+      "points": 60-70,
+      "feedback": "Why this is suboptimal"
+    }
+  ]
+}`;
+
+  const resp = await anthropic.messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 2000,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Image } },
+        { type: "text", text: prompt }
+      ]
+    }]
+  });
+  
+  const text = resp?.content?.[0]?.text ?? "";
+  const json = extractJson(text);
+  
+  if (!json) throw new Error("Failed to parse Claude response");
+  
+  return json;
 }
 
 async function analyzeFrame(framePath, playerPosition, tacticalPosition = "Unknown") {
@@ -189,296 +404,15 @@ Return JSON: {"playerDescription":"...","playerRole":"${tacticalPosition}","posi
   return await callClaudeJson({ base64Image, prompt, maxTokens: 3000 });
 }
 
-async function trackPlayerAndFindPossession(videoPath, initialPlayerPosition, videoDuration) {
-  const possessionMoments = [];
-  const trackingData = [];
-  const sampleInterval = 3;
-  const maxTs = Math.max(0, Math.floor(videoDuration) - 2);
-  let lastPos = initialPlayerPosition;
-  let descriptor = null;
-
-  for (let ts = 2; ts < maxTs; ts += sampleInterval) {
-    const frame = await extractFrame(videoPath, ts);
-    if (!descriptor) descriptor = await identifyPlayer(frame.path, initialPlayerPosition);
-    
-    // Add delay to avoid rate limits
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    const tr = await trackPlayerInFrame(frame.path, lastPos, descriptor);
-    if (tr.playerFound) {
-      lastPos = tr.position;
-      trackingData.push({ timestamp: ts, position: tr.position, hasBall: tr.hasBall, confidence: tr.confidence, tacticalPosition: tr.tacticalPosition });
-      if (tr.hasBall && tr.confidence > 70) {
-        possessionMoments.push({ timestamp: ts, position: tr.position, tacticalPosition: tr.tacticalPosition, framePath: frame.path, frameUrl: frame.url, confidence: tr.confidence });
-      }
-    }
-  }
-
-  if (!possessionMoments.length && trackingData.length) {
-    const top = trackingData.filter(f => f.confidence > 40).sort((a,b)=>b.confidence-a.confidence).slice(0,3);
-    for (const t of top) {
-      const f = await extractFrame(videoPath, t.timestamp);
-      possessionMoments.push({ timestamp: t.timestamp, position: t.position, tacticalPosition: t.tacticalPosition, framePath: f.path, frameUrl: f.url, confidence: t.confidence });
-    }
-  }
-  return { possessionMoments, trackingData };
-}
-
-app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
-
-app.post("/api/test-elite", (req, res) => {
-  console.log("🔥🔥🔥 TEST ENDPOINT HIT 🔥🔥🔥");
-  console.log("Body:", req.body);
-  res.json({ test: "success", body: req.body });
-});
-
-
-app.post("/api/upload-video", upload.single("video"), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "No video" });
-  return res.json({ success: true, videoId: req.file.filename, videoUrl: `/uploads/videos/${req.file.filename}` });
-});
-
-app.post("/api/analyze-player", async (req, res) => {
-  try {
-    const { videoPath, timestamp, playerPosition, tacticalPosition } = req.body || {};
-    if (!videoPath || typeof timestamp !== "number" || !playerPosition) return res.status(400).json({ error: "Missing parameters" });
-    const abs = path.isAbsolute(videoPath) ? videoPath : path.join(VIDEOS_DIR, path.basename(videoPath));
-    const frame = await extractFrame(abs, timestamp);
-    const analysis = await analyzeFrame(frame.path, playerPosition, tacticalPosition || "Unknown");
-    res.json({ success: true, timestamp, frameUrl: frame.url, analysis });
-  } catch (e) {
-    console.error("analyze-player:", e);
-    res.status(500).json({ error: "Analysis failed" });
-  }
-});
-
-app.post("/api/analyze-video", async (req, res) => {
-  console.log("========================================");
-  console.log("📹 PYTHON TRACKING - ANALYZE VIDEO");
-  
-  try {
-    const { videoPath, playerPosition } = req.body || {};
-    
-    if (!videoPath || !playerPosition) {
-      return res.status(400).json({ error: "Missing parameters" });
-    }
-    
-    const abs = path.join(VIDEOS_DIR, path.basename(videoPath));
-    
-    if (!fs.existsSync(abs)) {
-      return res.status(400).json({ error: "Video file not found" });
-    }
-    
-    console.log("🐍 Running Python tracker...");
-    console.log("Video:", abs);
-    console.log("Player position:", playerPosition);
-    
-    // Run Python tracking script
-    const decisionPoints = await runPythonTracker(abs, playerPosition);
-    
-    console.log(`✅ Python found ${decisionPoints.length} decision points`);
-    
-    if (decisionPoints.length === 0) {
-      return res.json({
-        success: false,
-        error: "No decision points found. Ball may not have come within 3 yards of the player."
-      });
-    }
-    
-    // Limit to 5 decision points for analysis
-    const selected = decisionPoints.slice(0, 5);
-    
-    console.log(`🧠 Analyzing ${selected.length} decision points with Claude...`);
-    
-    const analyses = [];
-    
-    for (const point of selected) {
-      // Extract 3 frames: before, during, after
-      const frameBefore = await extractFrame(abs, point.clip_start);
-      const frameDuring = await extractFrame(abs, point.timestamp);
-      const frameAfter = await extractFrame(abs, point.clip_end);
-      
-      // Analyze with enhanced prompt
-      const analysis = await analyzeDecisionWithFullContext(
-        [frameBefore, frameDuring, frameAfter],
-        point.player_position,
-        point.field_third
-      );
-      
-      analyses.push({
-        timestamp: point.timestamp,
-        frameUrl: frameDuring.url,
-        playerPosition: point.player_position,
-        tacticalPosition: point.field_third,
-        analysis: analysis
-      });
-    }
-    
-    console.log("✅ COMPLETE!");
-    console.log("========================================");
-    
-    res.json({
-      success: true,
-      totalDecisionPoints: decisionPoints.length,
-      analyses: analyses
-    });
-    
-  } catch (e) {
-    console.error("❌ Error:", e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Helper: Run Python tracking script
-function runPythonTracker(videoPath, playerPosition) {
-  return new Promise((resolve, reject) => {
-    const python = spawn('python3', [
-      'video_tracker.py',
-      videoPath,
-      (playerPosition.x / 100).toString(),
-      (playerPosition.y / 100).toString()
-    ]);
-    
-    let stdout = '';
-    let stderr = '';
-    
-    python.stdout.on('data', (data) => {
-      stdout += data.toString();
-    });
-    
-    python.stderr.on('data', (data) => {
-      stderr += data.toString();
-      console.log('[Python]', data.toString().trim());
-    });
-    
-    python.on('close', (code) => {
-      if (code !== 0) {
-        console.error('Python stderr:', stderr);
-        return reject(new Error(`Python script failed with code ${code}`));
-      }
-      
-    try {
-  // Extract only the JSON part (last line should be the JSON output)
-  const lines = stdout.trim().split('\n');
-  const jsonLine = lines[lines.length - 1];
-  const result = JSON.parse(jsonLine);
-  resolve(result);
-} catch (e) {
-  console.error('Raw Python output:', stdout);
-  reject(new Error(`Failed to parse Python output: ${e.message}`));
-}
-    });
-    
-    python.on('error', (err) => {
-      reject(new Error(`Failed to start Python: ${err.message}`));
-    });
-  });
-}
-
-// Enhanced analysis function with before/during/after context
-async function analyzeDecisionWithFullContext(frames, playerPosition, fieldThird) {
-  const [frameBefore, frameDuring, frameAfter] = frames;
-  
-  const base64Before = (await fsp.readFile(frameBefore.path)).toString("base64");
-  const base64During = (await fsp.readFile(frameDuring.path)).toString("base64");
-  const base64After = (await fsp.readFile(frameAfter.path)).toString("base64");
-  
-  const prompt = `You are an elite soccer tactical analyst.
-
-PLAYER: Position x=${playerPosition.x.toFixed(1)}%, y=${playerPosition.y.toFixed(1)}%
-FIELD POSITION: ${fieldThird}
-
-YOU HAVE 3 FRAMES:
-- FRAME 1 (5 sec BEFORE): Build-up
-- FRAME 2 (DECISION MOMENT): Player has ball
-- FRAME 3 (10 sec AFTER): Outcome
-
-ANALYZE:
-
-1️⃣ WHAT ACTUALLY HAPPENED (use Frame 3):
-- What did the player do?
-- What was the result?
-- Score this decision: 0-100
-- Goal opportunity created?
-
-2️⃣ OPTIMAL DECISION (use Frame 2):
-- Best possible action?
-- Why maximize goals?
-- Tactical principle?
-
-3️⃣ CREATE QUIZ (Frame 3):
-- Option A: Optimal (90-100 pts)
-- Option B: Decent (75-85 pts)
-- Option C: Poor (60-70 pts)
-
-JSON FORMAT:
-{
-  "situation": "Brief tactical situation (150-200 chars)",
-  "playerRole": "Inferred role",
-  "fieldLocation": "${fieldThird}",
-  "pressureLevel": "Low/Medium/High",
-  "whatActuallyHappened": {
-    "decision": "Specific action taken",
-    "outcome": "Result",
-    "scoreForRealDecision": 0-100,
-    "goalOpportunityCreated": true/false
-  },
-  "optimalDecision": {
-    "action": "Best action",
-    "reasoning": "Why optimal",
-    "principle": "Tactical principle"
-  },
-  "options": [
-    {"text": "...", "points": 90-100, "feedback": "...", "isOptimal": true},
-    {"text": "...", "points": 75-85, "feedback": "..."},
-    {"text": "...", "points": 60-70, "feedback": "..."}
-  ]
-}`;
-
-  const resp = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 4096,
-    messages: [{
-      role: "user",
-      content: [
-        { type: "text", text: "FRAME 1 - Before:" },
-        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Before } },
-        { type: "text", text: "FRAME 2 - Decision:" },
-        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64During } },
-        { type: "text", text: "FRAME 3 - After:" },
-        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64After } },
-        { type: "text", text: prompt }
-      ]
-    }]
-  });
-  
-  const text = resp?.content?.[0]?.text ?? "";
-  const json = extractJson(text);
-  
-  if (!json) throw new Error("Failed to parse response");
-  
-  return json;
-}
-
 app.post("/api/analyze-elite-action", async (req, res) => {
   console.log("🎯 ANALYZING ELITE ACTION");
   console.log("Full request body:", JSON.stringify(req.body, null, 2));
-  console.log("playerName:", req.body?.playerName);
-  console.log("situation:", req.body?.situation);
-  console.log("playerName type:", typeof req.body?.playerName);
-  console.log("situation type:", typeof req.body?.situation);
 
   try {
     const { playerName, decisionTimestamp, situation, userChoice, question } = req.body || {};
-    
-    console.log("After destructuring:");
-    console.log("playerName:", playerName);
-    console.log("situation:", situation);
 
     if (!playerName || !situation) {
       console.log("❌ FAILED VALIDATION!");
-      console.log("playerName is falsy:", !playerName);
-      console.log("situation is falsy:", !situation);
       return res.status(400).json({ error: "Missing parameters" });
     }
 
@@ -504,7 +438,6 @@ Return JSON:
   "improvementTip": "If user didn't match elite choice, what should they focus on improving?"
 }`;
 
-    // For text-based analysis, we'll create a simple completion without image
     const resp = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 1200,
@@ -708,4 +641,9 @@ app.get("/api/game-library", (_req, res) => {
   res.json(gameLibrary);
 });
 
-app.listen(PORT, () => console.log(`🚀 Server: http://localhost:${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Server: http://localhost:${PORT}`);
+  console.log(`📡 Modal GPU: ${MODAL_ENDPOINT ? 'Configured ✓' : 'NOT configured ✗'}`);
+  console.log(`🔑 Anthropic: ${process.env.ANTHROPIC_API_KEY ? 'Configured ✓' : 'NOT configured ✗'}`);
+  console.log('========================================');
+});
