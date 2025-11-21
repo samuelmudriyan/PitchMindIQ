@@ -116,6 +116,13 @@ async function extractFrame(videoPath, timestamp) {
   const ts = Math.max(0, Number(timestamp) || 0);
   const fname = `frame_${ts.toFixed(2)}s_${Date.now()}_${crypto.randomUUID()}.jpg`;
   const outPath = path.join(FRAMES_DIR, fname);
+  
+  // 🔧 CREATE THE DIRECTORY IF IT DOESN'T EXIST
+  if (!fs.existsSync(FRAMES_DIR)) {
+    fs.mkdirSync(FRAMES_DIR, { recursive: true });
+    console.log(`📁 Created frames directory: ${FRAMES_DIR}`);
+  }
+  
   await new Promise((resolve, reject) => {
     ffmpeg(videoPath)
       .seekInput(ts)
@@ -125,6 +132,7 @@ async function extractFrame(videoPath, timestamp) {
       .on("error", reject)
       .run();
   });
+  
   return { timestamp: ts, path: outPath, url: `/uploads/frames/${fname}` };
 }
 
