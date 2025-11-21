@@ -36,8 +36,8 @@ const app = express();
 app.set("trust proxy", 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(compression());
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use(express.json({ limit: "10gb" }));
+app.use(express.urlencoded({ extended: true, limit: "10gb" }));
 app.use(
   cors({
     origin: (origin, cb) => {
@@ -74,7 +74,9 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 * 1024 }, // 5GB limit
+  limits: { 
+    fileSize: 10 * 1024 * 1024 * 1024  // 10GB limit (effectively unlimited for most videos)
+  },
   fileFilter: (req, file, cb) => {
     const ok = ["video/mp4", "video/webm", "video/quicktime", "video/x-matroska"].includes(file.mimetype);
     ok ? cb(null, true) : cb(new Error("Unsupported video type"));
