@@ -7,7 +7,7 @@ import {
   Search, Star, Share2, Download, Zap, MousePointer, ArrowRight
 } from 'lucide-react';
 
-const API_BASE = 'pitchmind-backend-production-483d.up.railway.app'; // Update this
+const API_BASE = 'https://pitchmind-backend-production-483d.up.railway.app'; // Update this
 
 export default function PitchMindApp() {
   const [currentPage, setCurrentPage] = useState('dashboard');
