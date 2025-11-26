@@ -1,17 +1,14 @@
 """
 Modal GPU Worker for Pitch Mind - Serverless YOLO Video Tracking
-Processes soccer videos on NVIDIA T4 GPUs in the cloud
+With ByteTrack for persistent player tracking
 """
 
 import modal
 import io
 from typing import List, Dict
 
-# Create Modal app
-app = modal.App("pitchmind-gpu-tracker-v2")
+app = modal.App("pitchmind-gpu-tracker-v3")
 
-# Define the GPU environment with all dependencies
-# Updated: 2024-11-21 - Added OpenGL libraries for OpenCV
 gpu_image = (
     modal.Image.debian_slim()
     .apt_install(
@@ -31,17 +28,21 @@ gpu_image = (
         "numpy",
         "Pillow",
         "requests",
-        "fastapi"
+        "fastapi",
+        "supervision",  # NEW: ByteTrack
+        "pandas"        # NEW: Ball interpolation
     )
+    # Uncomment when you have your fine-tuned model:
+    # .add_local_file("best.pt", "/models/soccer_best.pt")
 )
 
-# GPU function - runs on serverless T4 GPU
+
 @app.function(
     image=gpu_image,
-    gpu="T4",  # NVIDIA T4 GPU - great price/performance
-    timeout=1200,  # 20 minute max per video (includes cold start time)
-    memory=8192,  # 8GB RAM
-    keep_warm=1,  # Keep 1 container warm to avoid cold starts
+    gpu="T4",
+    timeout=1200,
+    memory=8192,
+    keep_warm=1,
 )
 def track_player_gpu(
     video_bytes: bytes,
@@ -50,46 +51,42 @@ def track_player_gpu(
     video_filename: str = "video.mp4"
 ) -> Dict:
     """
-    Track a player in a soccer video using YOLO on GPU
-    
-    Args:
-        video_bytes: Raw video file bytes
-        player_x: Player's initial X position (0-100, percentage)
-        player_y: Player's initial Y position (0-100, percentage)
-        video_filename: Original filename for logging
-        
-    Returns:
-        Dictionary with decision points and metadata
+    Track a player using YOLO + ByteTrack for persistent IDs
     """
     import cv2
     import numpy as np
     import torch
+    import pandas as pd
+    import supervision as sv
     from ultralytics import YOLO
     import tempfile
     import os
     
-    print(f"🎮 GPU Worker started for: {video_filename}")
+    print(f"🎮 GPU Worker v3 (ByteTrack) started for: {video_filename}")
     print(f"GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
-    print(f"Player position: ({player_x:.2f}%, {player_y:.2f}%)")
+    print(f"Initial player position: ({player_x:.2f}%, {player_y:.2f}%)")
     
-    # Save video bytes to temporary file
     with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
         f.write(video_bytes)
         video_path = f.name
     
     try:
-        # Load YOLO model on GPU
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        
+        # Load model - swap to fine-tuned when ready
+        # model = YOLO('/models/soccer_best.pt')
         model = YOLO('yolov8n.pt')
         model.to(device)
         print(f"✓ YOLO loaded on {device}")
         
-        # Open video
+        # Initialize ByteTrack
+        tracker = sv.ByteTrack()
+        print(f"✓ ByteTrack initialized")
+        
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             raise ValueError(f"Could not open video: {video_filename}")
         
-        # Get video metadata
         fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -98,34 +95,22 @@ def track_player_gpu(
         
         print(f"Video: {width}x{height}, {fps:.1f} fps, {total_frames} frames ({duration:.1f}s)")
         
-        # Convert percentage to pixel coordinates
         player_pixel_x = int((player_x / 100) * width)
         player_pixel_y = int((player_y / 100) * height)
-        print(f"Tracking player at pixel: ({player_pixel_x}, {player_pixel_y})")
         
-        # Frame sampling for speed (process at ~10fps)
-        sample_rate = max(1, int(fps / 10))
-        print(f"Sample rate: every {sample_rate} frames (10fps effective)")
+        # ============================================
+        # PHASE 1: Run detection + tracking on all frames
+        # ============================================
+        print("📊 Phase 1: Detection & Tracking...")
         
-        # Tracking variables
-        decision_points = []
+        all_tracks = {
+            'players': [],  # List of dicts per frame: {track_id: {'bbox': [...], 'center': [...]}}
+            'ball': []      # List of dicts per frame: {'bbox': [...], 'center': [...]} or None
+        }
+        
         frame_num = 0
+        sample_rate = max(1, int(fps / 10))  # ~10 fps effective
         last_progress = 0
-        
-        # Detection thresholds
-        TOUCH_DISTANCE = 100  # pixels - player touching ball
-        MIN_FRAMES_BETWEEN_TOUCHES = int(fps * 2)  # 2 seconds between decision points
-        last_touch_frame = -MIN_FRAMES_BETWEEN_TOUCHES
-        
-        # Field zones (simple thirds)
-        def get_zone(y_pos, frame_height):
-            third = frame_height / 3
-            if y_pos < third:
-                return "Defensive Third"
-            elif y_pos < third * 2:
-                return "Middle Third"
-            else:
-                return "Attacking Third"
         
         while cap.isOpened():
             ret, frame = cap.read()
@@ -134,88 +119,168 @@ def track_player_gpu(
             
             frame_num += 1
             
-            # Skip frames for speed
             if frame_num % sample_rate != 0:
+                # Still append empty entries to maintain frame alignment
+                all_tracks['players'].append({})
+                all_tracks['ball'].append(None)
                 continue
             
-            # Progress logging
             progress = int((frame_num / total_frames) * 100)
-            if progress >= last_progress + 10:
-                print(f"Progress: {progress}% (Frame {frame_num}/{total_frames})")
+            if progress >= last_progress + 20:
+                print(f"  Detection: {progress}%")
                 last_progress = progress
             
-            # Run YOLO detection on GPU
+            # Run YOLO
             results = model(frame, device=device, verbose=False)[0]
             
-            # Find player and ball
-            player_box = None
-            ball_box = None
+            # Convert to supervision format
+            detections = sv.Detections.from_ultralytics(results)
             
-            for box in results.boxes:
-                cls = int(box.cls[0])
-                conf = float(box.conf[0])
-                
-                # Class 0 = person, 32 = sports ball (COCO dataset)
-                if cls == 0 and conf > 0.5:  # Person
-                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                    center_x = float((x1 + x2) / 2)
-                    center_y = float((y1 + y2) / 2)
-                    
-                    # Find player closest to initial click position
-                    distance = np.sqrt((center_x - player_pixel_x)**2 + (center_y - player_pixel_y)**2)
-                    
-                    if player_box is None or distance < player_box['distance']:
-                        player_box = {
-                            'bbox': [float(x1), float(y1), float(x2), float(y2)],
-                            'center': [center_x, center_y],
-                            'distance': float(distance),
-                            'confidence': float(conf)
-                        }
-                
-                elif cls == 32 and conf > 0.3:  # Ball
-                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                    center_x = float((x1 + x2) / 2)
-                    center_y = float((y1 + y2) / 2)
-                    
-                    if ball_box is None or conf > ball_box['confidence']:
-                        ball_box = {
-                            'bbox': [float(x1), float(y1), float(x2), float(y2)],
-                            'center': [center_x, center_y],
-                            'confidence': float(conf)
-                        }
+            # Filter to people only for tracking (class 0 in COCO)
+            # When using fine-tuned model, this will be 'player' and 'goalkeeper'
+            person_mask = detections.class_id == 0
+            person_detections = detections[person_mask]
             
-            # Check if player is near ball (potential decision point)
-            if player_box and ball_box:
-                player_center = np.array(player_box['center'])
-                ball_center = np.array(ball_box['center'])
-                distance = np.linalg.norm(player_center - ball_center)
-                
-                # Log periodic distances for debugging
-                if frame_num % (sample_rate * 30) == 0:  # Every ~3 seconds
-                    print(f"Frame {frame_num}: Player-ball distance = {distance:.1f} px")
-                
-                # Decision point detected
-                if distance < TOUCH_DISTANCE:
-                    # Avoid duplicate detections (must be 2+ seconds apart)
-                    if frame_num - last_touch_frame >= MIN_FRAMES_BETWEEN_TOUCHES:
-                        timestamp = frame_num / fps
-                        zone = get_zone(player_center[1], height)
-                        
-                        decision_points.append({
-                            'timestamp': float(round(timestamp, 1)),
-                            'frame': int(frame_num),
-                            'zone': zone,
-                            'player_position': [float(player_center[0]), float(player_center[1])],
-                            'ball_position': [float(ball_center[0]), float(ball_center[1])],
-                            'distance': float(round(distance, 1))
-                        })
-                        
-                        print(f"✓ DECISION POINT at {timestamp:.1f}s in {zone}")
-                        last_touch_frame = frame_num
+            # Update ByteTrack with person detections
+            tracked = tracker.update_with_detections(person_detections)
+            
+            # Store tracked players
+            frame_players = {}
+            if tracked.tracker_id is not None:
+                for i, track_id in enumerate(tracked.tracker_id):
+                    bbox = tracked.xyxy[i].tolist()
+                    center_x = (bbox[0] + bbox[2]) / 2
+                    center_y = (bbox[1] + bbox[3]) / 2
+                    frame_players[int(track_id)] = {
+                        'bbox': bbox,
+                        'center': [center_x, center_y]
+                    }
+            
+            all_tracks['players'].append(frame_players)
+            
+            # Find ball (class 32 in COCO = sports ball)
+            ball_mask = detections.class_id == 32
+            ball_detections = detections[ball_mask]
+            
+            if len(ball_detections) > 0:
+                # Take highest confidence ball
+                best_idx = ball_detections.confidence.argmax()
+                bbox = ball_detections.xyxy[best_idx].tolist()
+                center_x = (bbox[0] + bbox[2]) / 2
+                center_y = (bbox[1] + bbox[3]) / 2
+                all_tracks['ball'].append({
+                    'bbox': bbox,
+                    'center': [center_x, center_y],
+                    'confidence': float(ball_detections.confidence[best_idx])
+                })
+            else:
+                all_tracks['ball'].append(None)
         
         cap.release()
+        print(f"  Detected {frame_num} frames")
         
-        print(f"✅ Processing complete! Found {len(decision_points)} decision points")
+        # ============================================
+        # PHASE 2: Identify which track_id is our player
+        # ============================================
+        print("🎯 Phase 2: Identifying target player...")
+        
+        # Look at first few frames with detections to find player closest to click
+        target_track_id = None
+        min_distance = float('inf')
+        
+        for frame_players in all_tracks['players'][:30]:  # Check first 30 sampled frames
+            for track_id, player in frame_players.items():
+                center = player['center']
+                distance = np.sqrt((center[0] - player_pixel_x)**2 + (center[1] - player_pixel_y)**2)
+                if distance < min_distance:
+                    min_distance = distance
+                    target_track_id = track_id
+        
+        if target_track_id is None:
+            return {
+                'success': False,
+                'error': 'Could not identify target player from click position'
+            }
+        
+        print(f"  Target player: Track ID {target_track_id} (distance: {min_distance:.1f}px)")
+        
+        # ============================================
+        # PHASE 3: Interpolate ball positions
+        # ============================================
+        print("⚽ Phase 3: Interpolating ball positions...")
+        
+        ball_positions = []
+        for ball in all_tracks['ball']:
+            if ball is not None:
+                ball_positions.append(ball['center'])
+            else:
+                ball_positions.append([np.nan, np.nan])
+        
+        df_ball = pd.DataFrame(ball_positions, columns=['x', 'y'])
+        df_ball = df_ball.interpolate(method='linear', limit_direction='both')
+        df_ball = df_ball.bfill().ffill()
+        
+        interpolated_ball = df_ball.values.tolist()
+        print(f"  Interpolated {df_ball.isna().sum().sum()} missing ball positions")
+        
+        # ============================================
+        # PHASE 4: Find decision points
+        # ============================================
+        print("🧠 Phase 4: Finding decision points...")
+        
+        decision_points = []
+        TOUCH_DISTANCE = 100
+        MIN_FRAMES_BETWEEN = int(fps * 2)
+        last_touch_frame = -MIN_FRAMES_BETWEEN
+        
+        def get_zone(y_pos):
+            third = height / 3
+            if y_pos < third:
+                return "Defensive Third"
+            elif y_pos < third * 2:
+                return "Middle Third"
+            else:
+                return "Attacking Third"
+        
+        for frame_idx, frame_players in enumerate(all_tracks['players']):
+            # Skip if we didn't process this frame
+            if not frame_players:
+                continue
+            
+            # Check if our target player is in this frame
+            if target_track_id not in frame_players:
+                continue
+            
+            player = frame_players[target_track_id]
+            player_center = np.array(player['center'])
+            ball_center = np.array(interpolated_ball[frame_idx])
+            
+            if np.isnan(ball_center).any():
+                continue
+            
+            distance = np.linalg.norm(player_center - ball_center)
+            
+            if distance < TOUCH_DISTANCE:
+                actual_frame = (frame_idx + 1) * sample_rate
+                
+                if actual_frame - last_touch_frame >= MIN_FRAMES_BETWEEN:
+                    timestamp = actual_frame / fps
+                    zone = get_zone(player_center[1])
+                    
+                    decision_points.append({
+                        'timestamp': float(round(timestamp, 1)),
+                        'frame': int(actual_frame),
+                        'zone': zone,
+                        'player_position': [float(player_center[0]), float(player_center[1])],
+                        'ball_position': [float(ball_center[0]), float(ball_center[1])],
+                        'distance': float(round(distance, 1)),
+                        'track_id': int(target_track_id)
+                    })
+                    
+                    print(f"  ✓ Decision point at {timestamp:.1f}s in {zone}")
+                    last_touch_frame = actual_frame
+        
+        print(f"✅ Complete! Found {len(decision_points)} decision points")
         
         return {
             'success': True,
@@ -230,26 +295,19 @@ def track_player_gpu(
             },
             'processing_info': {
                 'sample_rate': int(sample_rate),
-                'frames_processed': int(frame_num // sample_rate),
-                'gpu_used': torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'
+                'target_track_id': int(target_track_id),
+                'gpu_used': torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU',
+                'tracker': 'ByteTrack'
             }
         }
     
     finally:
-        # Cleanup
         os.unlink(video_path)
 
 
-# Web endpoint - callable from Railway backend
-@app.function(
-    image=gpu_image,
-    timeout=1800,  # 30 minute timeout for web endpoint (longer than processing)
-)
+@app.function(image=gpu_image, timeout=1800)
 @modal.asgi_app()
 def fastapi_app():
-    """
-    HTTP endpoint for Railway to call
-    """
     from fastapi import FastAPI, Request
     from fastapi.responses import JSONResponse
     import requests
@@ -258,22 +316,10 @@ def fastapi_app():
     
     @web_app.post("/")
     async def analyze_video_endpoint(request: Request):
-        """
-        Expected JSON body:
-        {
-            "video_url": "https://...",
-            "player_x": 68.5,
-            "player_y": 42.3,
-            "filename": "video.mp4"
-        }
-        """
         try:
             item = await request.json()
         except Exception as e:
-            return JSONResponse({
-                'success': False,
-                'error': f'Invalid JSON: {str(e)}'
-            }, status_code=400)
+            return JSONResponse({'success': False, 'error': f'Invalid JSON: {str(e)}'}, status_code=400)
         
         video_url = item.get('video_url')
         player_x = item.get('player_x')
@@ -281,51 +327,27 @@ def fastapi_app():
         filename = item.get('filename', 'video.mp4')
         
         if not all([video_url, player_x is not None, player_y is not None]):
-            return JSONResponse({
-                'success': False,
-                'error': 'Missing required fields: video_url, player_x, player_y'
-            }, status_code=400)
+            return JSONResponse({'success': False, 'error': 'Missing required fields'}, status_code=400)
         
         print(f"📥 Downloading video from: {video_url}")
         
-        # Download video from Railway
         try:
             response = requests.get(video_url, timeout=300)
             response.raise_for_status()
             video_bytes = response.content
             print(f"✓ Downloaded {len(video_bytes) / 1024 / 1024:.1f} MB")
         except Exception as e:
-            return JSONResponse({
-                'success': False,
-                'error': f'Failed to download video: {str(e)}'
-            }, status_code=500)
+            return JSONResponse({'success': False, 'error': f'Failed to download: {str(e)}'}, status_code=500)
         
-        # Process on GPU (Modal auto-scales)
         try:
             result = track_player_gpu.remote(video_bytes, player_x, player_y, filename)
             return JSONResponse(result)
         except Exception as e:
-            return JSONResponse({
-                'success': False,
-                'error': f'GPU processing failed: {str(e)}'
-            }, status_code=500)
+            return JSONResponse({'success': False, 'error': f'GPU processing failed: {str(e)}'}, status_code=500)
     
     return web_app
 
 
-# Local testing function
 @app.local_entrypoint()
 def test_local():
-    """
-    Test the GPU worker locally with a sample video
-    """
-    print("🧪 Testing Modal GPU worker locally...")
-    
-    # You can test with a local video file
-    # with open("test_video.mp4", "rb") as f:
-    #     video_bytes = f.read()
-    # 
-    # result = track_player_gpu.remote(video_bytes, 50.0, 50.0, "test.mp4")
-    # print(result)
-    
-    print("Deploy this function with: modal deploy modal_gpu_worker.py")
+    print("Deploy with: modal deploy modal_gpu_worker.py")
