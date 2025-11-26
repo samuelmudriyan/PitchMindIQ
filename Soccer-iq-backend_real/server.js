@@ -32,6 +32,21 @@ if (!MODAL_ENDPOINT) {
   console.warn("⚠️  WARNING: MODAL_ENDPOINT not set - GPU processing disabled");
 }
 
+const { Pool } = require('pg');
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
+
+pool.query('SELECT NOW()', (err, res) => {
+  if (err) {
+    console.error('❌ Database connection error:', err);
+  } else {
+    console.log('✅ Database connected:', res.rows[0].now);
+  }
+});
+
 const app = express();
 app.set("trust proxy", 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
