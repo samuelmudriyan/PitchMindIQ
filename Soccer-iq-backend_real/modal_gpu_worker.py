@@ -42,7 +42,6 @@ gpu_image = (
     gpu="T4",
     timeout=1200,
     memory=8192,
-    keep_warm=1,
 )
 def track_player_gpu(
     video_bytes: bytes,
