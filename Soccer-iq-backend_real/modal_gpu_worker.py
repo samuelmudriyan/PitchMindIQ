@@ -1,23 +1,22 @@
 """
-Modal GPU Worker for Pitch Mind - V4
-YOLOv11 (Adit-jain/soccana) + ByteTrack
+Modal GPU Worker for Pitch Mind - V5
+Roboflow Soccer Detection Model + ByteTrack
 
-Uses pre-trained soccer model from Hugging Face:
-- Class 0: Player
-- Class 1: Ball
-- Class 2: Referee
+Uses pre-trained soccer model from Roboflow Universe:
+- football-players-detection-3zvbc/20
+- Classes: ball, goalkeeper, player, referee
+- 83% mAP@50, trained on 372 images
 
-ByteTrack chosen over DeepSORT based on real-world testing showing
-significantly better performance and stability.
+ByteTrack for multi-object tracking.
 """
 
 import modal
-from typing import Dict, Optional
+from typing import Dict
 
-app = modal.App("pitchmind-gpu-tracker-v4")
+app = modal.App("pitchmind-gpu-tracker-v5")
 
-# Volume for caching the model (avoids re-downloading on each cold start)
-model_volume = modal.Volume.from_name("pitchmind-models", create_if_missing=True)
+# Volume for caching the model
+model_volume = modal.Volume.from_name("pitchmind-models-v5", create_if_missing=True)
 
 gpu_image = (
     modal.Image.debian_slim(python_version="3.10")
@@ -42,38 +41,37 @@ gpu_image = (
         "fastapi",
         "supervision",
         "pandas",
-        "huggingface_hub"
+        "inference",  # Roboflow inference SDK
+        "inference-sdk"
     )
 )
 
+# Roboflow model config
+ROBOFLOW_API_KEY = "Flk5MLdPdTNVBChF7f64"
+ROBOFLOW_MODEL_ID = "football-players-detection-3zvbc/20"
 
-def download_model_if_needed() -> str:
-    """Download the soccana model from Hugging Face if not cached"""
+# Class mappings for this model
+# Based on the model page: ball, goalkeeper, player, referee
+CLASS_NAMES = {
+    'ball': 0,
+    'goalkeeper': 1, 
+    'player': 2,
+    'referee': 3
+}
+
+
+def get_roboflow_model():
+    """Get Roboflow model using inference SDK"""
+    from inference import get_model
     import os
-    from huggingface_hub import hf_hub_download
     
-    model_path = "/models/soccana_best.pt"
+    os.environ["ROBOFLOW_API_KEY"] = ROBOFLOW_API_KEY
     
-    if os.path.exists(model_path):
-        print(f"✓ Model already cached at {model_path}")
-        return model_path
+    print(f"📥 Loading Roboflow model: {ROBOFLOW_MODEL_ID}")
+    model = get_model(model_id=ROBOFLOW_MODEL_ID)
+    print(f"✓ Model loaded successfully")
     
-    print("📥 Downloading soccana model from Hugging Face...")
-    
-    # Download from Adit-jain/soccana
-    downloaded_path = hf_hub_download(
-        repo_id="Adit-jain/soccana",
-        filename="best.pt",
-        local_dir="/models",
-        local_dir_use_symlinks=False
-    )
-    
-    # Rename to our expected path
-    if downloaded_path != model_path:
-        os.rename(downloaded_path, model_path)
-    
-    print(f"✓ Model downloaded to {model_path}")
-    return model_path
+    return model
 
 
 @app.function(
@@ -82,24 +80,23 @@ def download_model_if_needed() -> str:
     timeout=600,
     memory=8192,
     volumes={"/models": model_volume},
-    # NO keep_warm - costs money when idle!
 )
 def track_player_gpu(
     video_bytes: bytes,
     player_x: float,
     player_y: float,
     video_filename: str = "video.mp4",
-    click_timestamp: float = 0.0  # NEW: timestamp where user clicked
+    click_timestamp: float = 0.0
 ) -> Dict:
     """
-    Track a player using YOLOv11 (soccana) + ByteTrack
+    Track a player using Roboflow Soccer Model + ByteTrack
     
     Args:
         video_bytes: Raw video file bytes
         player_x: Click X position (pixels)
         player_y: Click Y position (pixels)
         video_filename: Original filename for logging
-        click_timestamp: Video timestamp (seconds) where user clicked to select player
+        click_timestamp: Video timestamp (seconds) where user clicked
     
     Returns:
         Dictionary with decision points and metadata
@@ -109,13 +106,12 @@ def track_player_gpu(
     import torch
     import pandas as pd
     import supervision as sv
-    from ultralytics import YOLO
     import tempfile
     import os
     
-    print(f"🎮 GPU Worker V4 (soccana + ByteTrack) started for: {video_filename}")
+    print(f"🎮 GPU Worker V5 (Roboflow Soccer + ByteTrack) started for: {video_filename}")
     print(f"GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
-    print(f"Initial player position: ({player_x:.2f}, {player_y:.2f}) at {click_timestamp:.2f}s")
+    print(f"Click position: ({player_x:.2f}, {player_y:.2f}) at {click_timestamp:.2f}s")
     
     # Write video to temp file
     with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
@@ -123,26 +119,12 @@ def track_player_gpu(
         video_path = f.name
     
     try:
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        
         # ============================================
-        # Load Model
+        # Load Roboflow Model
         # ============================================
-        model_path = download_model_if_needed()
-        model = YOLO(model_path)
-        model.to(device)
+        model = get_roboflow_model()
         
-        # Verify classes
-        class_names = model.names
-        print(f"✓ Model loaded. Classes: {class_names}")
-        # Expected: {0: 'Player', 1: 'Ball', 2: 'Referee'}
-        
-        # Class IDs for soccana model
-        PLAYER_CLASS = 0
-        BALL_CLASS = 1
-        REFEREE_CLASS = 2
-        
-        # Initialize ByteTrack (proven best performer)
+        # Initialize ByteTrack
         tracker = sv.ByteTrack(
             track_activation_threshold=0.25,
             lost_track_buffer=30,
@@ -166,12 +148,8 @@ def track_player_gpu(
         
         print(f"Video: {width}x{height}, {fps:.1f} fps, {total_frames} frames ({duration:.1f}s)")
         
-        # Frontend sends pixel coordinates directly
         player_pixel_x = int(player_x)
         player_pixel_y = int(player_y)
-        
-        # Calculate which frame index corresponds to click_timestamp
-        click_frame = int(click_timestamp * fps)
         
         # ============================================
         # PHASE 1: Detection & Tracking
@@ -179,8 +157,8 @@ def track_player_gpu(
         print("📊 Phase 1: Detection & Tracking...")
         
         all_tracks = {
-            'players': [],  # List of dicts per frame: {track_id: {'bbox': [...], 'center': [...]}}
-            'ball': []      # List of dicts per frame: {'bbox': [...], 'center': [...]} or None
+            'players': [],  # Includes players AND goalkeepers
+            'ball': []
         }
         
         frame_num = 0
@@ -204,15 +182,47 @@ def track_player_gpu(
                 print(f"  Detection: {progress}%")
                 last_progress = progress
             
-            # Run YOLO
-            results = model(frame, device=device, verbose=False)[0]
+            # Run Roboflow inference
+            results = model.infer(frame)[0]
             
-            # Convert to supervision format
-            detections = sv.Detections.from_ultralytics(results)
+            # Parse predictions into supervision format
+            boxes = []
+            confidences = []
+            class_ids = []
             
-            # Filter to PLAYERS only for tracking (class 0)
-            # This excludes referees (class 2) automatically!
-            player_mask = detections.class_id == PLAYER_CLASS
+            for pred in results.predictions:
+                # Roboflow returns x,y center and width,height
+                x_center = pred.x
+                y_center = pred.y
+                w = pred.width
+                h = pred.height
+                
+                # Convert to xyxy format
+                x1 = x_center - w/2
+                y1 = y_center - h/2
+                x2 = x_center + w/2
+                y2 = y_center + h/2
+                
+                boxes.append([x1, y1, x2, y2])
+                confidences.append(pred.confidence)
+                
+                # Map class name to ID
+                class_name = pred.class_name.lower()
+                class_id = CLASS_NAMES.get(class_name, 2)  # default to player
+                class_ids.append(class_id)
+            
+            # Create supervision Detections
+            if boxes:
+                detections = sv.Detections(
+                    xyxy=np.array(boxes),
+                    confidence=np.array(confidences),
+                    class_id=np.array(class_ids)
+                )
+            else:
+                detections = sv.Detections.empty()
+            
+            # Filter to PLAYERS and GOALKEEPERS for tracking
+            player_mask = (detections.class_id == CLASS_NAMES['player']) | (detections.class_id == CLASS_NAMES['goalkeeper'])
             player_detections = detections[player_mask]
             
             # Update ByteTrack with player detections
@@ -225,15 +235,17 @@ def track_player_gpu(
                     bbox = tracked.xyxy[i].tolist()
                     center_x = (bbox[0] + bbox[2]) / 2
                     center_y = (bbox[1] + bbox[3]) / 2
+                    class_id = tracked.class_id[i] if tracked.class_id is not None else CLASS_NAMES['player']
                     frame_players[int(track_id)] = {
                         'bbox': bbox,
-                        'center': [center_x, center_y]
+                        'center': [center_x, center_y],
+                        'class': 'goalkeeper' if class_id == CLASS_NAMES['goalkeeper'] else 'player'
                     }
             
             all_tracks['players'].append(frame_players)
             
-            # Find ball (class 1)
-            ball_mask = detections.class_id == BALL_CLASS
+            # Find ball
+            ball_mask = detections.class_id == CLASS_NAMES['ball']
             ball_detections = detections[ball_mask]
             
             if len(ball_detections) > 0:
@@ -314,7 +326,7 @@ def track_player_gpu(
         
         decision_points = []
         TOUCH_DISTANCE = 100  # pixels
-        MIN_FRAMES_BETWEEN = int(fps * 2)  # 2 seconds minimum between decision points
+        MIN_FRAMES_BETWEEN = int(fps * 2)  # 2 seconds minimum
         last_touch_frame = -MIN_FRAMES_BETWEEN
         
         def get_zone(y_pos):
@@ -357,7 +369,8 @@ def track_player_gpu(
                         'player_position': [float(player_center[0]), float(player_center[1])],
                         'ball_position': [float(ball_center[0]), float(ball_center[1])],
                         'distance': float(round(distance, 1)),
-                        'track_id': int(target_track_id)
+                        'track_id': int(target_track_id),
+                        'player_type': player.get('class', 'player')
                     })
                     
                     print(f"  ✓ Decision point at {timestamp:.1f}s in {zone}")
@@ -384,8 +397,8 @@ def track_player_gpu(
                 'target_track_id': int(target_track_id),
                 'gpu_used': torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU',
                 'tracker': 'ByteTrack',
-                'model': 'Adit-jain/soccana (YOLOv11)',
-                'classes': {'player': 0, 'ball': 1, 'referee': 2}
+                'model': f'Roboflow {ROBOFLOW_MODEL_ID}',
+                'classes': CLASS_NAMES
             }
         }
     
@@ -396,8 +409,6 @@ def track_player_gpu(
 @app.function(
     image=gpu_image,
     timeout=300,
-    # NO GPU for web endpoint - just receives requests
-    # NO keep_warm!
 )
 @modal.asgi_app()
 def fastapi_app():
@@ -406,14 +417,15 @@ def fastapi_app():
     from fastapi.responses import JSONResponse
     import requests as http_requests
     
-    web_app = FastAPI(title="PitchMind GPU Tracker V4")
+    web_app = FastAPI(title="PitchMind GPU Tracker V5")
     
     @web_app.get("/health")
     async def health():
         return {
             "status": "ok",
-            "version": "v4",
-            "model": "Adit-jain/soccana",
+            "version": "v5",
+            "model": f"Roboflow {ROBOFLOW_MODEL_ID}",
+            "classes": ["ball", "goalkeeper", "player", "referee"],
             "tracker": "ByteTrack"
         }
     
@@ -431,7 +443,7 @@ def fastapi_app():
         player_x = item.get('player_x')
         player_y = item.get('player_y')
         filename = item.get('filename', 'video.mp4')
-        click_timestamp = item.get('click_timestamp', 0.0)  # NEW
+        click_timestamp = item.get('click_timestamp', 0.0)
         
         if not all([video_url, player_x is not None, player_y is not None]):
             return JSONResponse({
@@ -440,7 +452,7 @@ def fastapi_app():
             }, status_code=400)
         
         print(f"📥 Downloading video from: {video_url}")
-        print(f"📍 Click at ({player_x}, {player_y}) @ {click_timestamp}s")  # NEW
+        print(f"📍 Click at ({player_x}, {player_y}) @ {click_timestamp}s")
         
         try:
             response = http_requests.get(video_url, timeout=300)
@@ -454,13 +466,12 @@ def fastapi_app():
             }, status_code=500)
         
         try:
-            # Call GPU function (spawns on GPU container)
             result = track_player_gpu.remote(
                 video_bytes,
                 player_x,
                 player_y,
                 filename,
-                click_timestamp  # NEW
+                click_timestamp
             )
             return JSONResponse(result)
         except Exception as e:
@@ -476,27 +487,19 @@ def fastapi_app():
 def test_local():
     """Test entrypoint"""
     print("=" * 50)
-    print("PitchMind GPU Tracker V4")
+    print("PitchMind GPU Tracker V5")
     print("=" * 50)
     print("")
-    print("Model: Adit-jain/soccana (YOLOv11)")
-    print("  - Class 0: Player")
-    print("  - Class 1: Ball")
-    print("  - Class 2: Referee (filtered out)")
+    print(f"Model: Roboflow {ROBOFLOW_MODEL_ID}")
+    print("  - Class 0: ball")
+    print("  - Class 1: goalkeeper")
+    print("  - Class 2: player")
+    print("  - Class 3: referee")
     print("")
     print("Tracker: ByteTrack")
-    print("  - Proven best performer in real-world tests")
-    print("  - Better than DeepSORT, BoT-SORT, Norfair")
     print("")
     print("Deploy:")
-    print("  modal deploy modal_gpu_worker_v4.py")
+    print("  modal deploy modal_gpu_worker_v5.py")
     print("")
-    print("Test:")
-    print('  curl -X POST https://YOUR-APP.modal.run \\')
-    print('    -H "Content-Type: application/json" \\')
-    print('    -d \'{"video_url": "...", "player_x": 50, "player_y": 50}\'')
-    print("")
-    print("Cost Safety:")
-    print("  - No keep_warm (only pay when processing)")
-    print("  - 10 min timeout max")
-    print("  - Model cached in Volume (faster cold starts)")
+    print("Endpoint will be:")
+    print("  https://YOUR-WORKSPACE--pitchmind-gpu-tracker-v5-fastapi-app.modal.run")
