@@ -666,7 +666,59 @@ app.get("/api/game-library", (_req, res) => {
   };
   res.json(gameLibrary);
 });
-
+// 🔥 Combined upload + analyze endpoint (for frontend)
+app.post("/api/analyze", upload.single("video"), async (req, res) => {
+  console.log("========================================");
+  console.log("📹 COMBINED UPLOAD + ANALYZE");
+  
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No video file" });
+    }
+    
+    const clickX = parseFloat(req.body.clickX);
+    const clickY = parseFloat(req.body.clickY);
+    
+    if (isNaN(clickX) || isNaN(clickY)) {
+      return res.status(400).json({ error: "Missing click position" });
+    }
+    
+    const videoPath = req.file.path;
+    const filename = req.file.filename;
+    
+    console.log("Video:", filename);
+    console.log("Click position:", clickX, clickY);
+    
+    // Get video dimensions to convert click to percentage
+    const duration = await getVideoDuration(videoPath);
+    
+    // Call Modal GPU
+    console.log('🎮 Sending to Modal GPU...');
+    const gpuResults = await callModalGPU(videoPath, clickX, clickY, filename);
+    
+    console.log(`✅ Modal found ${gpuResults.decision_points?.length || 0} decision points`);
+    
+    if (!gpuResults.decision_points || gpuResults.decision_points.length === 0) {
+      return res.json({
+        success: true,
+        decision_points: [],
+        message: "No decision points found"
+      });
+    }
+    
+    console.log("✅ COMPLETE!");
+    res.json({
+      success: true,
+      decision_points: gpuResults.decision_points,
+      video_metadata: gpuResults.video_metadata,
+      processing_info: gpuResults.processing_info
+    });
+    
+  } catch (e) {
+    console.error("❌ Error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
 app.listen(PORT, () => {
   console.log(`🚀 Server: http://localhost:${PORT}`);
   console.log(`📡 Modal GPU: ${MODAL_ENDPOINT ? 'Configured ✓' : 'NOT configured ✗'}`);
