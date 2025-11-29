@@ -21,7 +21,7 @@ const ORIGINS = (process.env.CORS_ORIGINS || "http://localhost:3000")
   .filter(Boolean);
 
 // 🚀 MODAL GPU ENDPOINT
-const MODAL_ENDPOINT = process.env.MODAL_ENDPOINT || "https://meatyhd6--pitchmind-gpu-tracker-fastapi-app.modal.run";
+const MODAL_ENDPOINT = process.env.MODAL_ENDPOINT || "https://meatyhd6--pitchmind-gpu-tracker-v4-fastapi-app.modal.run";
 
 if (!process.env.ANTHROPIC_API_KEY) {
   console.error("Missing ANTHROPIC_API_KEY");
