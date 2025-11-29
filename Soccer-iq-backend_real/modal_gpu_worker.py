@@ -88,16 +88,18 @@ def track_player_gpu(
     video_bytes: bytes,
     player_x: float,
     player_y: float,
-    video_filename: str = "video.mp4"
+    video_filename: str = "video.mp4",
+    click_timestamp: float = 0.0  # NEW: timestamp where user clicked
 ) -> Dict:
     """
     Track a player using YOLOv11 (soccana) + ByteTrack
     
     Args:
         video_bytes: Raw video file bytes
-        player_x: Click X position (0-100%)
-        player_y: Click Y position (0-100%)
+        player_x: Click X position (pixels)
+        player_y: Click Y position (pixels)
         video_filename: Original filename for logging
+        click_timestamp: Video timestamp (seconds) where user clicked to select player
     
     Returns:
         Dictionary with decision points and metadata
@@ -113,7 +115,7 @@ def track_player_gpu(
     
     print(f"🎮 GPU Worker V4 (soccana + ByteTrack) started for: {video_filename}")
     print(f"GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
-    print(f"Initial player position: ({player_x:.2f}%, {player_y:.2f}%)")
+    print(f"Initial player position: ({player_x:.2f}, {player_y:.2f}) at {click_timestamp:.2f}s")
     
     # Write video to temp file
     with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
@@ -164,8 +166,12 @@ def track_player_gpu(
         
         print(f"Video: {width}x{height}, {fps:.1f} fps, {total_frames} frames ({duration:.1f}s)")
         
-        player_pixel_x = int((player_x / 100) * width)
-        player_pixel_y = int((player_y / 100) * height)
+        # Frontend sends pixel coordinates directly
+        player_pixel_x = int(player_x)
+        player_pixel_y = int(player_y)
+        
+        # Calculate which frame index corresponds to click_timestamp
+        click_frame = int(click_timestamp * fps)
         
         # ============================================
         # PHASE 1: Detection & Tracking
@@ -248,15 +254,23 @@ def track_player_gpu(
         print(f"  Detected {frame_num} frames")
         
         # ============================================
-        # PHASE 2: Identify Target Player
+        # PHASE 2: Identify Target Player at Click Time
         # ============================================
         print("🎯 Phase 2: Identifying target player...")
         
         target_track_id = None
         min_distance = float('inf')
         
-        # Check first 30 sampled frames to find player closest to click
-        for frame_players in all_tracks['players'][:30]:
+        # Calculate which sampled frame index corresponds to click_timestamp
+        click_sample_idx = int((click_timestamp * fps) / sample_rate)
+        
+        # Search around the click timestamp (+/- 15 sampled frames = ~1.5 seconds)
+        search_start = max(0, click_sample_idx - 15)
+        search_end = min(len(all_tracks['players']), click_sample_idx + 15)
+        
+        print(f"  Searching frames {search_start}-{search_end} (click at {click_timestamp:.1f}s)")
+        
+        for frame_players in all_tracks['players'][search_start:search_end]:
             for track_id, player in frame_players.items():
                 center = player['center']
                 distance = np.sqrt((center[0] - player_pixel_x)**2 + (center[1] - player_pixel_y)**2)
@@ -417,6 +431,7 @@ def fastapi_app():
         player_x = item.get('player_x')
         player_y = item.get('player_y')
         filename = item.get('filename', 'video.mp4')
+        click_timestamp = item.get('click_timestamp', 0.0)  # NEW
         
         if not all([video_url, player_x is not None, player_y is not None]):
             return JSONResponse({
@@ -425,6 +440,7 @@ def fastapi_app():
             }, status_code=400)
         
         print(f"📥 Downloading video from: {video_url}")
+        print(f"📍 Click at ({player_x}, {player_y}) @ {click_timestamp}s")  # NEW
         
         try:
             response = http_requests.get(video_url, timeout=300)
@@ -443,7 +459,8 @@ def fastapi_app():
                 video_bytes,
                 player_x,
                 player_y,
-                filename
+                filename,
+                click_timestamp  # NEW
             )
             return JSONResponse(result)
         except Exception as e:
