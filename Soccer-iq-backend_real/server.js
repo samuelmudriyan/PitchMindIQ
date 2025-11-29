@@ -164,8 +164,7 @@ async function extractFrame(videoPath, timestamp) {
 
 
 // 🔥 NEW: Call Modal GPU for video tracking
-async function callModalGPU(videoPath, playerX, playerY, filename) {
-  // Construct video URL with proper scheme
+async function callModalGPU(videoPath, playerX, playerY, filename, clickTimestamp = 0) {
   const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
   const baseUrl = domain 
     ? (domain.startsWith('http') ? domain : `https://${domain}`)
@@ -175,6 +174,7 @@ async function callModalGPU(videoPath, playerX, playerY, filename) {
   
   console.log(`🚀 Calling Modal GPU...`);
   console.log(`Video URL: ${videoUrl}`);
+  console.log(`Click timestamp: ${clickTimestamp}s`); // NEW
   
   const response = await fetch(MODAL_ENDPOINT, {
     method: 'POST',
@@ -185,7 +185,8 @@ async function callModalGPU(videoPath, playerX, playerY, filename) {
       video_url: videoUrl,
       player_x: playerX,
       player_y: playerY,
-      filename: filename
+      filename: filename,
+      click_timestamp: clickTimestamp  // NEW
     })
   });
   
@@ -226,21 +227,56 @@ app.post("/api/upload-video", upload.single("video"), (req, res) => {
   });
 });
 
-app.post("/api/analyze-player", async (req, res) => {
+// 🔥 Combined upload + analyze endpoint (for frontend)
+app.post("/api/analyze", upload.single("video"), async (req, res) => {
+  console.log("========================================");
+  console.log("📹 COMBINED UPLOAD + ANALYZE");
+  
   try {
-    const { videoPath, timestamp, playerPosition, tacticalPosition } = req.body || {};
-    if (!videoPath || typeof timestamp !== "number" || !playerPosition) {
-      return res.status(400).json({ error: "Missing parameters" });
+    if (!req.file) {
+      return res.status(400).json({ error: "No video file" });
     }
     
-    const abs = path.isAbsolute(videoPath) ? videoPath : path.join(VIDEOS_DIR, path.basename(videoPath));
-    const frame = await extractFrame(abs, timestamp);
-    const analysis = await analyzeFrame(frame.path, playerPosition, tacticalPosition || "Unknown");
+    const clickX = parseFloat(req.body.clickX);
+    const clickY = parseFloat(req.body.clickY);
+    const clickTimestamp = parseFloat(req.body.clickTimestamp) || 0; // NEW
     
-    res.json({ success: true, timestamp, frameUrl: frame.url, analysis });
+    if (isNaN(clickX) || isNaN(clickY)) {
+      return res.status(400).json({ error: "Missing click position" });
+    }
+    
+    const videoPath = req.file.path;
+    const filename = req.file.filename;
+    
+    console.log("Video:", filename);
+    console.log("Click position:", clickX, clickY);
+    console.log("Click timestamp:", clickTimestamp); // NEW
+    
+    // Call Modal GPU with timestamp
+    console.log('🎮 Sending to Modal GPU...');
+    const gpuResults = await callModalGPU(videoPath, clickX, clickY, filename, clickTimestamp); // NEW
+    
+    console.log(`✅ Modal found ${gpuResults.decision_points?.length || 0} decision points`);
+    
+    if (!gpuResults.decision_points || gpuResults.decision_points.length === 0) {
+      return res.json({
+        success: true,
+        decision_points: [],
+        message: "No decision points found"
+      });
+    }
+    
+    console.log("✅ COMPLETE!");
+    res.json({
+      success: true,
+      decision_points: gpuResults.decision_points,
+      video_metadata: gpuResults.video_metadata,
+      processing_info: gpuResults.processing_info
+    });
+    
   } catch (e) {
-    console.error("analyze-player:", e);
-    res.status(500).json({ error: "Analysis failed" });
+    console.error("❌ Error:", e);
+    res.status(500).json({ error: e.message });
   }
 });
 
