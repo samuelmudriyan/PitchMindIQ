@@ -149,30 +149,39 @@ export default function PitchMindApp() {
 
   // Handle video click to select player
   const handleVideoClick = (e) => {
-    if (uploadState !== 'selecting') return;
-    
-    const video = videoRef.current;
-    const rect = video.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * video.videoWidth;
-    const y = ((e.clientY - rect.top) / rect.height) * video.videoHeight;
-    
-    setClickPosition({ x, y, displayX: e.clientX - rect.left, displayY: e.clientY - rect.top });
-  };
+  if (uploadState !== 'selecting') return;
+  
+  const video = videoRef.current;
+  const rect = video.getBoundingClientRect();
+  const x = ((e.clientX - rect.left) / rect.width) * video.videoWidth;
+  const y = ((e.clientY - rect.top) / rect.height) * video.videoHeight;
+  const timestamp = video.currentTime; // NEW: capture timestamp
+  
+  setClickPosition({ 
+    x, 
+    y, 
+    timestamp, // NEW
+    displayX: e.clientX - rect.left, 
+    displayY: e.clientY - rect.top 
+  });
+};
 
   // Start analysis
   const startAnalysis = async () => {
-    if (!videoFile || !clickPosition) return;
+  if (!videoFile || !clickPosition) return;
+  
+  setUploadState('uploading');
+  setUploadProgress(0);
+  setError(null);
+
+  try {
+    const formData = new FormData();
+    formData.append('video', videoFile);
+    formData.append('clickX', Math.round(clickPosition.x));
+    formData.append('clickY', Math.round(clickPosition.y));
+    formData.append('clickTimestamp', clickPosition.timestamp || 0); // NEW
     
-    setUploadState('uploading');
-    setUploadProgress(0);
-    setError(null);
-
-    try {
-      const formData = new FormData();
-      formData.append('video', videoFile);
-      formData.append('clickX', Math.round(clickPosition.x));
-      formData.append('clickY', Math.round(clickPosition.y));
-
+    // ... rest stays the same
       // Simulate upload progress
       const progressInterval = setInterval(() => {
         setUploadProgress(prev => {
