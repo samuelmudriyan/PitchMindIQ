@@ -168,6 +168,10 @@ export default function PitchMindApp() {
 
   // Start analysis
   const startAnalysis = async () => {
+     if (videoRef.current) 
+     {
+    videoRef.current.pause();
+     }
   if (!videoFile || !clickPosition) return;
   
   setUploadState('uploading');
