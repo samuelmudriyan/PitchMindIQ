@@ -48,7 +48,7 @@ gpu_image = (
 
 # Roboflow model config
 ROBOFLOW_API_KEY = "Flk5MLdPdTNVBChF7f64"
-ROBOFLOW_MODEL_ID = "football-players-detection-3zvbc/20"
+ROBOFLOW_MODEL_ID = "football-players-detection-3zvbc-t4kql/1"
 
 # Class mappings for this model
 # Based on the model page: ball, goalkeeper, player, referee
