@@ -92,7 +92,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { 
-    fileSize: 10 * 1024 * 1024 * 1024  // 10GB limit (effectively unlimited for most videos)
+    fileSize: 10 * 1024 * 1024 * 1024  // 10GB limit
   },
   fileFilter: (req, file, cb) => {
     const ok = ["video/mp4", "video/webm", "video/quicktime", "video/x-matroska"].includes(file.mimetype);
@@ -143,7 +143,6 @@ async function extractFrame(videoPath, timestamp) {
   const fname = `frame_${ts.toFixed(2)}s_${Date.now()}_${crypto.randomUUID()}.jpg`;
   const outPath = path.join(FRAMES_DIR, fname);
   
-  // Create the directory if it doesn't exist
   if (!fs.existsSync(FRAMES_DIR)) {
     fs.mkdirSync(FRAMES_DIR, { recursive: true });
     console.log(`📁 Created frames directory: ${FRAMES_DIR}`);
@@ -163,7 +162,7 @@ async function extractFrame(videoPath, timestamp) {
 }
 
 
-// 🔥 NEW: Call Modal GPU for video tracking
+// 🔥 Call Modal GPU for video tracking - WITH 40 MINUTE TIMEOUT
 async function callModalGPU(videoPath, playerX, playerY, filename, clickTimestamp = 0) {
   const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
   const baseUrl = domain 
@@ -174,34 +173,49 @@ async function callModalGPU(videoPath, playerX, playerY, filename, clickTimestam
   
   console.log(`🚀 Calling Modal GPU...`);
   console.log(`Video URL: ${videoUrl}`);
-  console.log(`Click timestamp: ${clickTimestamp}s`); // NEW
+  console.log(`Click timestamp: ${clickTimestamp}s`);
   
-  const response = await fetch(MODAL_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      video_url: videoUrl,
-      player_x: playerX,
-      player_y: playerY,
-      filename: filename,
-      click_timestamp: clickTimestamp  // NEW
-    })
-  });
+  // 40 minute timeout for long videos
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2400000); // 40 minutes in ms
   
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Modal API error: ${response.status} - ${errorText}`);
+  try {
+    const response = await fetch(MODAL_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        video_url: videoUrl,
+        player_x: playerX,
+        player_y: playerY,
+        filename: filename,
+        click_timestamp: clickTimestamp
+      }),
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeout);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Modal API error: ${response.status} - ${errorText}`);
+    }
+    
+    const result = await response.json();
+    
+    if (!result.success) {
+      throw new Error(result.error || 'Modal GPU processing failed');
+    }
+    
+    return result;
+  } catch (error) {
+    clearTimeout(timeout);
+    if (error.name === 'AbortError') {
+      throw new Error('Modal GPU request timed out after 40 minutes');
+    }
+    throw error;
   }
-  
-  const result = await response.json();
-  
-  if (!result.success) {
-    throw new Error(result.error || 'Modal GPU processing failed');
-  }
-  
-  return result;
 }
 
 app.get("/api/health", (_req, res) => {
@@ -239,7 +253,7 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
     
     const clickX = parseFloat(req.body.clickX);
     const clickY = parseFloat(req.body.clickY);
-    const clickTimestamp = parseFloat(req.body.clickTimestamp) || 0; // NEW
+    const clickTimestamp = parseFloat(req.body.clickTimestamp) || 0;
     
     if (isNaN(clickX) || isNaN(clickY)) {
       return res.status(400).json({ error: "Missing click position" });
@@ -250,11 +264,11 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
     
     console.log("Video:", filename);
     console.log("Click position:", clickX, clickY);
-    console.log("Click timestamp:", clickTimestamp); // NEW
+    console.log("Click timestamp:", clickTimestamp);
     
     // Call Modal GPU with timestamp
     console.log('🎮 Sending to Modal GPU...');
-    const gpuResults = await callModalGPU(videoPath, clickX, clickY, filename, clickTimestamp); // NEW
+    const gpuResults = await callModalGPU(videoPath, clickX, clickY, filename, clickTimestamp);
     
     console.log(`✅ Modal found ${gpuResults.decision_points?.length || 0} decision points`);
     
@@ -280,7 +294,7 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
   }
 });
 
-// 🔥 UPDATED: Analyze video with Modal GPU
+// 🔥 Analyze video with Modal GPU
 app.post("/api/analyze-video", async (req, res) => {
   console.log("========================================");
   console.log("📹 MODAL GPU - ANALYZE VIDEO");
@@ -303,21 +317,18 @@ app.post("/api/analyze-video", async (req, res) => {
     console.log("Video:", abs);
     console.log("Player position:", playerPosition);
     
-    // Get video duration for validation
     const duration = await getVideoDuration(abs);
     const durationMinutes = Math.floor(duration / 60);
     
     console.log(`Duration: ${durationMinutes}m ${Math.floor(duration % 60)}s`);
     
-    // Warn if video is very long
-    if (duration > 1800) {  // 30 minutes
+    if (duration > 1800) {
       return res.status(400).json({
         error: 'Video too long',
         message: `This video is ${durationMinutes} minutes long. Please upload clips under 30 minutes.`
       });
     }
     
-    // Call Modal GPU for tracking
     console.log('🎮 Sending to Modal GPU...');
     const gpuResults = await callModalGPU(abs, playerPosition.x, playerPosition.y, filename);
     
@@ -331,7 +342,6 @@ app.post("/api/analyze-video", async (req, res) => {
       });
     }
     
-    // Limit to 5 decision points for Claude analysis
     const selected = gpuResults.decision_points.slice(0, 5);
     
     console.log(`🧠 Analyzing ${selected.length} decision points with Claude...`);
@@ -343,10 +353,8 @@ app.post("/api/analyze-video", async (req, res) => {
       
       console.log(`Analyzing point ${i + 1}/${selected.length} at ${point.timestamp}s`);
       
-      // Extract frame at decision point
       const frameDuring = await extractFrame(abs, point.timestamp);
       
-      // Analyze with Claude
       const analysis = await analyzeDecisionPoint(
         frameDuring.path,
         {
@@ -367,7 +375,6 @@ app.post("/api/analyze-video", async (req, res) => {
         analysis: analysis
       });
       
-      // Add delay to avoid rate limits
       if (i < selected.length - 1) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
@@ -390,7 +397,6 @@ app.post("/api/analyze-video", async (req, res) => {
   }
 });
 
-// Helper: Analyze a single decision point with Claude
 async function analyzeDecisionPoint(framePath, playerPosition, zone) {
   const base64Image = (await fsp.readFile(framePath)).toString("base64");
   
@@ -702,59 +708,7 @@ app.get("/api/game-library", (_req, res) => {
   };
   res.json(gameLibrary);
 });
-// 🔥 Combined upload + analyze endpoint (for frontend)
-app.post("/api/analyze", upload.single("video"), async (req, res) => {
-  console.log("========================================");
-  console.log("📹 COMBINED UPLOAD + ANALYZE");
-  
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: "No video file" });
-    }
-    
-    const clickX = parseFloat(req.body.clickX);
-    const clickY = parseFloat(req.body.clickY);
-    
-    if (isNaN(clickX) || isNaN(clickY)) {
-      return res.status(400).json({ error: "Missing click position" });
-    }
-    
-    const videoPath = req.file.path;
-    const filename = req.file.filename;
-    
-    console.log("Video:", filename);
-    console.log("Click position:", clickX, clickY);
-    
-    // Get video dimensions to convert click to percentage
-    const duration = await getVideoDuration(videoPath);
-    
-    // Call Modal GPU
-    console.log('🎮 Sending to Modal GPU...');
-    const gpuResults = await callModalGPU(videoPath, clickX, clickY, filename);
-    
-    console.log(`✅ Modal found ${gpuResults.decision_points?.length || 0} decision points`);
-    
-    if (!gpuResults.decision_points || gpuResults.decision_points.length === 0) {
-      return res.json({
-        success: true,
-        decision_points: [],
-        message: "No decision points found"
-      });
-    }
-    
-    console.log("✅ COMPLETE!");
-    res.json({
-      success: true,
-      decision_points: gpuResults.decision_points,
-      video_metadata: gpuResults.video_metadata,
-      processing_info: gpuResults.processing_info
-    });
-    
-  } catch (e) {
-    console.error("❌ Error:", e);
-    res.status(500).json({ error: e.message });
-  }
-});
+
 app.listen(PORT, () => {
   console.log(`🚀 Server: http://localhost:${PORT}`);
   console.log(`📡 Modal GPU: ${MODAL_ENDPOINT ? 'Configured ✓' : 'NOT configured ✗'}`);
