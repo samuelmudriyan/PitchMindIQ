@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
+import { UserButton } from '@clerk/clerk-react';
 import { 
   Upload, Play, Pause, RotateCcw, CheckCircle, AlertCircle, 
   Loader2, X, ChevronRight, Target, Clock, MapPin, Brain,
@@ -126,11 +127,7 @@ export default function PitchMindApp() {
         <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg">
           <Settings className="w-5 h-5" />
         </button>
-        <img 
-          src="https://api.dicebear.com/7.x/avataaars/svg?seed=Coach" 
-          alt="" 
-          className="w-9 h-9 rounded-full border-2 border-gray-200" 
-        />
+        <UserButton afterSignOutUrl="/" />
       </div>
     </div>
   );
