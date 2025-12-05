@@ -13,6 +13,7 @@ const multer = require("multer");
 const ffmpeg = require("fluent-ffmpeg");
 const Anthropic = require("@anthropic-ai/sdk");
 const { execSync, spawn } = require("child_process");
+const Groq = require("groq-sdk");
 
 const PORT = Number(process.env.PORT || 5000);
 const ORIGINS = (process.env.CORS_ORIGINS || "http://localhost:3000")
@@ -30,6 +31,12 @@ if (!process.env.ANTHROPIC_API_KEY) {
 
 if (!MODAL_ENDPOINT) {
   console.warn("⚠️  WARNING: MODAL_ENDPOINT not set - GPU processing disabled");
+}
+
+// 🤖 GROQ AI COACH
+const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
+if (!groq) {
+  console.warn("⚠️  WARNING: GROQ_API_KEY not set - AI Coach disabled");
 }
 
 const { Pool } = require('pg');
@@ -145,7 +152,6 @@ async function extractFrame(videoPath, timestamp) {
   
   if (!fs.existsSync(FRAMES_DIR)) {
     fs.mkdirSync(FRAMES_DIR, { recursive: true });
-    console.log(`📁 Created frames directory: ${FRAMES_DIR}`);
   }
   
   await new Promise((resolve, reject) => {
@@ -161,8 +167,7 @@ async function extractFrame(videoPath, timestamp) {
   return { timestamp: ts, path: outPath, url: `/uploads/frames/${fname}` };
 }
 
-
-// 🔥 Call Modal GPU for video tracking - WITH 40 MINUTE TIMEOUT
+// 🔥 Call Modal GPU for video tracking
 async function callModalGPU(videoPath, playerX, playerY, filename, clickTimestamp = 0) {
   const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
   const baseUrl = domain 
@@ -175,16 +180,13 @@ async function callModalGPU(videoPath, playerX, playerY, filename, clickTimestam
   console.log(`Video URL: ${videoUrl}`);
   console.log(`Click timestamp: ${clickTimestamp}s`);
   
-  // 40 minute timeout for long videos
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2400000); // 40 minutes in ms
+  const timeout = setTimeout(() => controller.abort(), 2400000);
   
   try {
     const response = await fetch(MODAL_ENDPOINT, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         video_url: videoUrl,
         player_x: playerX,
@@ -203,17 +205,11 @@ async function callModalGPU(videoPath, playerX, playerY, filename, clickTimestam
     }
     
     const result = await response.json();
-    
-    if (!result.success) {
-      throw new Error(result.error || 'Modal GPU processing failed');
-    }
-    
+    if (!result.success) throw new Error(result.error || 'Modal GPU processing failed');
     return result;
   } catch (error) {
     clearTimeout(timeout);
-    if (error.name === 'AbortError') {
-      throw new Error('Modal GPU request timed out after 40 minutes');
-    }
+    if (error.name === 'AbortError') throw new Error('Modal GPU request timed out after 40 minutes');
     throw error;
   }
 }
@@ -222,68 +218,113 @@ app.get("/api/health", (_req, res) => {
   res.json({ 
     status: "ok",
     modalConfigured: !!MODAL_ENDPOINT,
-    modalEndpoint: MODAL_ENDPOINT ? "configured" : "missing"
+    groqConfigured: !!groq
   });
 });
 
-app.post("/api/test-elite", (req, res) => {
-  console.log("🔥🔥🔥 TEST ENDPOINT HIT 🔥🔥🔥");
-  console.log("Body:", req.body);
-  res.json({ test: "success", body: req.body });
+// 🤖 AI COACH ENDPOINT - Groq Llama 3.3 70B
+app.post("/api/coach", async (req, res) => {
+  console.log("🤖 AI COACH REQUEST");
+  
+  try {
+    const { message, context } = req.body;
+    
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    if (!groq) {
+      return res.status(500).json({ error: 'AI Coach not configured - missing GROQ_API_KEY' });
+    }
+
+    let teamContext = '';
+    if (context) {
+      if (context.playerCount > 0) {
+        teamContext += `\n\nTeam Information:`;
+        teamContext += `\n- Total Players: ${context.playerCount}`;
+        if (context.players && context.players.length > 0) {
+          teamContext += `\n- Player Roster:`;
+          context.players.forEach(p => {
+            teamContext += `\n  • ${p.name} (${p.position}, Decision IQ: ${p.rating})`;
+          });
+        }
+      }
+      if (context.recentSessions && context.recentSessions.length > 0) {
+        teamContext += `\n- Recent Sessions: ${context.recentSessions.map(s => s.title).join(', ')}`;
+      }
+    }
+
+    const systemPrompt = `You are an elite soccer/football coach AI assistant for PitchMind. You have deep expertise in:
+
+- Tactical formations and systems (4-3-3, 4-4-2, 3-5-2, etc.)
+- Player development and training methodologies
+- Decision-making under pressure
+- Modern coaching philosophies (Guardiola's positional play, Klopp's gegenpressing, etc.)
+- Youth development and age-appropriate training
+- Match analysis and opponent scouting
+- Set piece design and execution
+- Physical conditioning and periodization
+- Mental performance and team psychology
+
+You provide specific, actionable advice. When suggesting drills, include:
+- Clear setup instructions
+- Player counts and positions
+- Coaching points to emphasize
+- Progressions to make it harder/easier
+
+Keep responses focused and practical. Use bullet points for clarity when listing multiple items.
+${teamContext}`;
+
+    const completion = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: message }
+      ],
+      temperature: 0.7,
+      max_tokens: 1024,
+    });
+
+    const response = completion.choices[0]?.message?.content || 'I apologize, I could not generate a response. Please try again.';
+    
+    console.log("✅ AI Coach response generated");
+    res.json({ response });
+  } catch (error) {
+    console.error('❌ Groq API Error:', error);
+    res.status(500).json({ error: 'Failed to get AI response', details: error.message });
+  }
 });
 
 app.post("/api/upload-video", upload.single("video"), (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No video" });
-  return res.json({ 
-    success: true, 
-    videoId: req.file.filename, 
-    videoUrl: `/uploads/videos/${req.file.filename}` 
-  });
+  return res.json({ success: true, videoId: req.file.filename, videoUrl: `/uploads/videos/${req.file.filename}` });
 });
 
-// 🔥 Combined upload + analyze endpoint (for frontend)
 app.post("/api/analyze", upload.single("video"), async (req, res) => {
-  console.log("========================================");
   console.log("📹 COMBINED UPLOAD + ANALYZE");
   
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: "No video file" });
-    }
+    if (!req.file) return res.status(400).json({ error: "No video file" });
     
     const clickX = parseFloat(req.body.clickX);
     const clickY = parseFloat(req.body.clickY);
     const clickTimestamp = parseFloat(req.body.clickTimestamp) || 0;
     
-    if (isNaN(clickX) || isNaN(clickY)) {
-      return res.status(400).json({ error: "Missing click position" });
-    }
+    if (isNaN(clickX) || isNaN(clickY)) return res.status(400).json({ error: "Missing click position" });
     
     const videoPath = req.file.path;
     const filename = req.file.filename;
     
     console.log("Video:", filename);
     console.log("Click position:", clickX, clickY);
-    console.log("Click timestamp:", clickTimestamp);
     
-    // Call Modal GPU with timestamp
-    console.log('🎮 Sending to Modal GPU...');
     const gpuResults = await callModalGPU(videoPath, clickX, clickY, filename, clickTimestamp);
     
     console.log(`✅ Modal found ${gpuResults.decision_points?.length || 0} decision points`);
     
-    if (!gpuResults.decision_points || gpuResults.decision_points.length === 0) {
-      return res.json({
-        success: true,
-        decision_points: [],
-        message: "No decision points found"
-      });
-    }
-    
-    console.log("✅ COMPLETE!");
     res.json({
       success: true,
-      decision_points: gpuResults.decision_points,
+      decision_points: gpuResults.decision_points || [],
       video_metadata: gpuResults.video_metadata,
       processing_info: gpuResults.processing_info
     });
@@ -294,94 +335,52 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
   }
 });
 
-// 🔥 Analyze video with Modal GPU
 app.post("/api/analyze-video", async (req, res) => {
-  console.log("========================================");
   console.log("📹 MODAL GPU - ANALYZE VIDEO");
   
   try {
     const { videoPath, playerPosition } = req.body || {};
-    
-    if (!videoPath || !playerPosition) {
-      return res.status(400).json({ error: "Missing parameters" });
-    }
+    if (!videoPath || !playerPosition) return res.status(400).json({ error: "Missing parameters" });
     
     const abs = path.join(VIDEOS_DIR, path.basename(videoPath));
-    
-    if (!fs.existsSync(abs)) {
-      return res.status(400).json({ error: "Video file not found" });
-    }
+    if (!fs.existsSync(abs)) return res.status(400).json({ error: "Video file not found" });
     
     const filename = path.basename(abs);
-    
-    console.log("Video:", abs);
-    console.log("Player position:", playerPosition);
-    
     const duration = await getVideoDuration(abs);
-    const durationMinutes = Math.floor(duration / 60);
-    
-    console.log(`Duration: ${durationMinutes}m ${Math.floor(duration % 60)}s`);
     
     if (duration > 1800) {
-      return res.status(400).json({
-        error: 'Video too long',
-        message: `This video is ${durationMinutes} minutes long. Please upload clips under 30 minutes.`
-      });
+      return res.status(400).json({ error: 'Video too long', message: `Please upload clips under 30 minutes.` });
     }
     
-    console.log('🎮 Sending to Modal GPU...');
     const gpuResults = await callModalGPU(abs, playerPosition.x, playerPosition.y, filename);
     
-    console.log(`✅ Modal found ${gpuResults.decision_points.length} decision points`);
-    console.log(`GPU used: ${gpuResults.processing_info?.gpu_used || 'Unknown'}`);
-    
     if (gpuResults.decision_points.length === 0) {
-      return res.json({
-        success: false,
-        error: "No decision points found in this video."
-      });
+      return res.json({ success: false, error: "No decision points found in this video." });
     }
     
     const selected = gpuResults.decision_points.slice(0, 5);
-    
-    console.log(`🧠 Analyzing ${selected.length} decision points with Claude...`);
-    
     const analyses = [];
     
     for (let i = 0; i < selected.length; i++) {
       const point = selected[i];
-      
-      console.log(`Analyzing point ${i + 1}/${selected.length} at ${point.timestamp}s`);
-      
       const frameDuring = await extractFrame(abs, point.timestamp);
       
       const analysis = await analyzeDecisionPoint(
         frameDuring.path,
-        {
-          x: point.player_position[0] / gpuResults.video_metadata.width * 100,
-          y: point.player_position[1] / gpuResults.video_metadata.height * 100
-        },
+        { x: point.player_position[0] / gpuResults.video_metadata.width * 100, y: point.player_position[1] / gpuResults.video_metadata.height * 100 },
         point.zone
       );
       
       analyses.push({
         timestamp: point.timestamp,
         frameUrl: frameDuring.url,
-        playerPosition: {
-          x: point.player_position[0] / gpuResults.video_metadata.width * 100,
-          y: point.player_position[1] / gpuResults.video_metadata.height * 100
-        },
+        playerPosition: { x: point.player_position[0] / gpuResults.video_metadata.width * 100, y: point.player_position[1] / gpuResults.video_metadata.height * 100 },
         zone: point.zone,
         analysis: analysis
       });
       
-      if (i < selected.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
+      if (i < selected.length - 1) await new Promise(resolve => setTimeout(resolve, 1000));
     }
-    
-    console.log("✅ COMPLETE!");
-    console.log("========================================");
     
     res.json({
       success: true,
@@ -420,69 +419,30 @@ Return JSON:
     "principle": "Tactical principle"
   },
   "options": [
-    {
-      "text": "Option A - detailed description",
-      "points": 90-100,
-      "feedback": "Tactical feedback",
-      "isOptimal": true
-    },
-    {
-      "text": "Option B - detailed description",
-      "points": 75-85,
-      "feedback": "Why this is decent but not optimal"
-    },
-    {
-      "text": "Option C - detailed description",
-      "points": 60-70,
-      "feedback": "Why this is suboptimal"
-    }
+    { "text": "Option A - detailed description", "points": 90, "feedback": "Tactical feedback", "isOptimal": true },
+    { "text": "Option B - detailed description", "points": 75, "feedback": "Why this is decent but not optimal" },
+    { "text": "Option C - detailed description", "points": 60, "feedback": "Why this is suboptimal" }
   ]
 }`;
 
   const resp = await anthropic.messages.create({
     model: "claude-sonnet-4-20250514",
     max_tokens: 2000,
-    messages: [{
-      role: "user",
-      content: [
-        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Image } },
-        { type: "text", text: prompt }
-      ]
-    }]
+    messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Image } }, { type: "text", text: prompt }] }]
   });
   
   const text = resp?.content?.[0]?.text ?? "";
   const json = extractJson(text);
-  
   if (!json) throw new Error("Failed to parse Claude response");
-  
   return json;
-}
-
-async function analyzeFrame(framePath, playerPosition, tacticalPosition = "Unknown") {
-  const base64Image = (await fsp.readFile(framePath)).toString("base64");
-  const prompt = `Analyze moment for player at x=${playerPosition.x.toFixed(1)}%, y=${playerPosition.y.toFixed(1)}%, role=${tacticalPosition}.
-
-IMPORTANT: 
-- Only include the current score in "situation", NOT the game context (championship, cup, etc.)
-- Keep situation focused on tactical positioning, numerical advantages, and immediate opportunities
-- Be concise and action-focused
-
-Return JSON: {"playerDescription":"...","playerRole":"${tacticalPosition}","positionCorrect":true/false,"actualPosition":"...","teamSide":"Left/Right","fieldLocation":"...","situation":"Score: X-X. [Tactical situation in 150-200 chars focusing on positioning, space, and immediate options]","numericalAdvantage":"...","keySpaces":"...","pressureLevel":"Low/Medium/High","options":[{"text":"...","points":0-100,"feedback":"...","eliteComparison":"..."},{"text":"...","points":0-100,"feedback":"...","eliteComparison":"..."},{"text":"...","points":0-100,"feedback":"...","eliteComparison":"..."}]}`;
-  return await callClaudeJson({ base64Image, prompt, maxTokens: 3000 });
 }
 
 app.post("/api/analyze-elite-action", async (req, res) => {
   console.log("🎯 ANALYZING ELITE ACTION");
-  console.log("Full request body:", JSON.stringify(req.body, null, 2));
 
   try {
-    const { playerName, decisionTimestamp, situation, userChoice, question } = req.body || {};
-
-    if (!playerName || !situation) {
-      console.log("❌ FAILED VALIDATION!");
-      return res.status(400).json({ error: "Missing parameters" });
-    }
+    const { playerName, situation, userChoice, question } = req.body || {};
+    if (!playerName || !situation) return res.status(400).json({ error: "Missing parameters" });
 
     const prompt = `You are a professional soccer analyst studying ${playerName}'s decision-making in a match.
 
@@ -490,39 +450,24 @@ SITUATION: ${situation}
 QUESTION ASKED: ${question}
 USER'S CHOICE: "${userChoice}"
 
-Based on your knowledge of ${playerName}'s playing style and elite tactical principles:
-
-1. What would ${playerName} MOST LIKELY do in this exact situation? (Be specific about the action)
-2. Why is this the tactically superior choice?
-3. How does this decision demonstrate elite-level game intelligence?
-4. Does the user's choice align with what the elite player would do?
-
 Return JSON:
 {
-  "eliteAction": "Specific description of what ${playerName} would do (2-3 sentences with tactical detail)",
-  "whyElite": "Tactical reasoning explaining why this is optimal (2-3 sentences)",
-  "tacticalLesson": "Key learning point for the user (1-2 sentences)",
+  "eliteAction": "Specific description of what ${playerName} would do",
+  "whyElite": "Tactical reasoning",
+  "tacticalLesson": "Key learning point",
   "matchedUserChoice": true/false,
-  "improvementTip": "If user didn't match elite choice, what should they focus on improving?"
+  "improvementTip": "If user didn't match elite choice, what should they focus on?"
 }`;
 
     const resp = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 1200,
-      messages: [{ 
-        role: "user", 
-        content: prompt 
-      }],
+      messages: [{ role: "user", content: prompt }],
     });
     
-    const text = resp?.content?.[0]?.text ?? "";
-    const analysis = extractJson(text);
-    
-    if (!analysis) {
-      throw new Error("No valid JSON in response");
-    }
+    const analysis = extractJson(resp?.content?.[0]?.text ?? "");
+    if (!analysis) throw new Error("No valid JSON in response");
 
-    console.log("✅ Elite analysis complete");
     res.json({ success: true, analysis });
   } catch (e) {
     console.error("❌ analyze-elite-action error:", e);
@@ -533,177 +478,13 @@ Return JSON:
 app.get("/api/game-library", (_req, res) => {
   const gameLibrary = {
     midfielder: [
-      { 
-        id:"central-midfielder-1", 
-        title:"Kevin De Bruyne - Vision & Passing", 
-        description:"Watch elite playmaking and decision-making", 
-        position:"Central Midfielder", 
-        youtubeId:"cDjfkqF0pFI", 
-        thumbnail:"https://i.ytimg.com/vi/cDjfkqF0pFI/hqdefault.jpg", 
-        duration:"10:30", 
-        difficulty:"Advanced", 
-        keyPlayers:["Kevin De Bruyne"], 
-        quizQuestions:[
-          { timestamp:45, situation:"De Bruyne receives ball in central midfield with passing options on both sides", question:"What should De Bruyne do?", options:[
-            { text:"Play a safe sideways pass to retain possession", points:70, feedback:"Safe but doesn't exploit the space. Elite playmakers look for progressive options first.", eliteChoice:false },
-            { text:"Thread a through ball between the defenders to the striker", points:95, feedback:"Perfect! De Bruyne's signature move - spotting runs early and playing weighted passes through tight spaces.", eliteChoice:true },
-            { text:"Dribble forward to draw defenders", points:75, feedback:"Good attacking intent, but De Bruyne's strength is his passing, not dribbling in tight spaces.", eliteChoice:false }
-          ]},
-          { timestamp:125, situation:"Counter-attack opportunity with teammates making runs wide", question:"Which pass should De Bruyne make?", options:[
-            { text:"Quick switch to the far winger", points:92, feedback:"Excellent vision! De Bruyne often uses these diagonal switches to exploit space.", eliteChoice:true },
-            { text:"Play it forward to the closest forward", points:78, feedback:"Decent choice but doesn't maximize the width advantage.", eliteChoice:false },
-            { text:"Hold the ball and wait for support", points:65, feedback:"Too slow for a counter-attack. Transition speed is crucial.", eliteChoice:false }
-          ]}
-        ]
-      },
-      { 
-        id:"attacking-midfielder-1", 
-        title:"Bruno Fernandes - Attacking Midfield", 
-        description:"Master creative playmaking in the final third", 
-        position:"Attacking Midfielder", 
-        youtubeId:"UtBNPQ4vHuo", 
-        thumbnail:"https://i.ytimg.com/vi/UtBNPQ4vHuo/hqdefault.jpg", 
-        duration:"9:45", 
-        difficulty:"Advanced", 
-        keyPlayers:["Bruno Fernandes"], 
-        quizQuestions:[
-          { timestamp:60, situation:"Receiving the ball in the final third with defenders closing down", question:"What's the best decision?", options:[
-            { text:"Quick one-two with nearby teammate", points:88, feedback:"Smart! Combination play unlocks tight defenses.", eliteChoice:true },
-            { text:"Turn and shoot from distance", points:72, feedback:"Bold but low percentage. Elite players create better chances first.", eliteChoice:false },
-            { text:"Pass backwards to reset", points:65, feedback:"Too conservative in a dangerous area.", eliteChoice:false }
-          ]}
-        ]
-      },
-      { 
-        id:"defensive-midfielder-1", 
-        title:"Rodri - Defensive Midfield Intelligence", 
-        description:"Learn positioning and ball recovery", 
-        position:"Defensive Midfielder", 
-        youtubeId:"Lpz4PUPJ5kM", 
-        thumbnail:"https://i.ytimg.com/vi/Lpz4PUPJ5kM/hqdefault.jpg", 
-        duration:"8:30", 
-        difficulty:"Advanced", 
-        keyPlayers:["Rodri"], 
-        quizQuestions:[
-          { timestamp:90, situation:"Opposition building from the back, deciding when to press", question:"When should Rodri press?", options:[
-            { text:"Press immediately to force an error", points:68, feedback:"Too aggressive - can be bypassed easily.", eliteChoice:false },
-            { text:"Wait for a poor touch or backwards pass, then close down", points:94, feedback:"Perfect timing! Rodri excels at reading these moments.", eliteChoice:true },
-            { text:"Drop deep and maintain defensive shape", points:80, feedback:"Safe but passive. Top DMs know when to be proactive.", eliteChoice:false }
-          ]}
-        ]
-      }
+      { id:"central-midfielder-1", title:"Kevin De Bruyne - Vision & Passing", description:"Watch elite playmaking", position:"Central Midfielder", youtubeId:"cDjfkqF0pFI", thumbnail:"https://i.ytimg.com/vi/cDjfkqF0pFI/hqdefault.jpg", duration:"10:30", difficulty:"Advanced", keyPlayers:["Kevin De Bruyne"], quizQuestions:[{ timestamp:45, situation:"De Bruyne receives ball in central midfield with passing options on both sides", question:"What should De Bruyne do?", options:[{ text:"Play a safe sideways pass", points:70, feedback:"Safe but doesn't exploit space.", eliteChoice:false },{ text:"Thread a through ball to the striker", points:95, feedback:"Perfect! De Bruyne's signature move.", eliteChoice:true },{ text:"Dribble forward to draw defenders", points:75, feedback:"Good intent but passing is his strength.", eliteChoice:false }]}]}
     ],
     forward: [
-      { 
-        id:"striker-1", 
-        title:"Erling Haaland - Elite Striker Movement", 
-        description:"Study world-class finishing and positioning", 
-        position:"Striker", 
-        youtubeId:"pP8r4yDPnyE", 
-        thumbnail:"https://i.ytimg.com/vi/pP8r4yDPnyE/hqdefault.jpg", 
-        duration:"11:00", 
-        difficulty:"Advanced", 
-        keyPlayers:["Erling Haaland"], 
-        quizQuestions:[
-          { timestamp:180, situation:"Through ball played behind the defense, 1v1 with goalkeeper", question:"What finishing technique should Haaland use?", options:[
-            { text:"Chip the goalkeeper", points:75, feedback:"Risky technique. Works if keeper rushes out.", eliteChoice:false },
-            { text:"Side-foot finish into far corner", points:96, feedback:"Clinical! Haaland's trademark - composed, accurate, high percentage finish.", eliteChoice:true },
-            { text:"Power shot near post", points:82, feedback:"Can work but keeper has better chance. Far post is statistically better.", eliteChoice:false }
-          ]}
-        ]
-      },
-      { 
-        id:"winger-1", 
-        title:"Mohamed Salah - Winger Decision Making", 
-        description:"Learn when to cut inside vs stay wide", 
-        position:"Winger", 
-        youtubeId:"XbX_rexTv2c", 
-        thumbnail:"https://i.ytimg.com/vi/XbX_rexTv2c/hqdefault.jpg", 
-        duration:"10:15", 
-        difficulty:"Intermediate", 
-        keyPlayers:["Mohamed Salah"], 
-        quizQuestions:[
-          { timestamp:95, situation:"1v1 with full-back on the right wing, space to cut inside", question:"What should Salah do?", options:[
-            { text:"Cut inside onto left foot and shoot", points:93, feedback:"Signature Salah! Using his stronger foot from this angle creates the best scoring chance.", eliteChoice:true },
-            { text:"Go down the line and cross", points:76, feedback:"Predictable. Defenders expect this and Salah's left foot shot is more dangerous.", eliteChoice:false },
-            { text:"Pass backwards to recycle possession", points:68, feedback:"Too negative in a 1v1 situation. Elite wingers back themselves.", eliteChoice:false }
-          ]}
-        ]
-      },
-      { 
-        id:"second-striker-1", 
-        title:"Son Heung-min - Second Striker Intelligence", 
-        description:"Master movement between lines", 
-        position:"Second Striker", 
-        youtubeId:"XDbN1CDGFks", 
-        thumbnail:"https://i.ytimg.com/vi/XDbN1CDGFks/hqdefault.jpg", 
-        duration:"9:00", 
-        difficulty:"Advanced", 
-        keyPlayers:["Son Heung-min"], 
-        quizQuestions:[
-          { timestamp:120, situation:"Team building attack, finding space between midfield and defense", question:"Where should Son position himself?", options:[
-            { text:"Drop deep to receive ball to feet", points:78, feedback:"Shows for the ball but doesn't exploit the dangerous space.", eliteChoice:false },
-            { text:"Make a run in behind the defensive line", points:91, feedback:"Perfect! Son's elite movement - timing runs into space defenders can't see.", eliteChoice:true },
-            { text:"Stay high and pin the center backs", points:72, feedback:"Traditional striker role, but Son's versatility is his strength.", eliteChoice:false }
-          ]}
-        ]
-      }
+      { id:"striker-1", title:"Erling Haaland - Elite Striker Movement", description:"Study world-class finishing", position:"Striker", youtubeId:"pP8r4yDPnyE", thumbnail:"https://i.ytimg.com/vi/pP8r4yDPnyE/hqdefault.jpg", duration:"11:00", difficulty:"Advanced", keyPlayers:["Erling Haaland"], quizQuestions:[{ timestamp:180, situation:"Through ball played behind defense, 1v1 with goalkeeper", question:"What finishing technique?", options:[{ text:"Chip the goalkeeper", points:75, feedback:"Risky technique.", eliteChoice:false },{ text:"Side-foot finish into far corner", points:96, feedback:"Clinical! Haaland's trademark.", eliteChoice:true },{ text:"Power shot near post", points:82, feedback:"Can work but far post is better.", eliteChoice:false }]}]}
     ],
     defender: [
-      { 
-        id:"center-back-1", 
-        title:"Virgil van Dijk - Center Back Masterclass", 
-        description:"Elite defensive positioning and timing", 
-        position:"Center Back", 
-        youtubeId:"x5U41vtX_Nw", 
-        thumbnail:"https://i.ytimg.com/vi/x5U41vtX_Nw/hqdefault.jpg", 
-        duration:"10:00", 
-        difficulty:"Advanced", 
-        keyPlayers:["Virgil van Dijk"], 
-        quizQuestions:[
-          { timestamp:75, situation:"Striker making a run, deciding whether to step up or drop off", question:"What should Van Dijk do?", options:[
-            { text:"Step up aggressively to catch striker offside", points:89, feedback:"Excellent! Van Dijk's defensive awareness allows him to play a high line.", eliteChoice:true },
-            { text:"Drop deep to cover the space in behind", points:75, feedback:"Safe but reactive. Elite defenders dictate terms.", eliteChoice:false },
-            { text:"Hold position and wait for the pass", points:70, feedback:"Passive approach. Van Dijk prevents chances, not just reacts.", eliteChoice:false }
-          ]}
-        ]
-      },
-      { 
-        id:"fullback-1", 
-        title:"Trent Alexander-Arnold - Modern Full Back", 
-        description:"Master the complete full-back role", 
-        position:"Full Back", 
-        youtubeId:"DDvzWdlw6no", 
-        thumbnail:"https://i.ytimg.com/vi/DDvzWdlw6no/hqdefault.jpg", 
-        duration:"9:30", 
-        difficulty:"Intermediate", 
-        keyPlayers:["Trent Alexander-Arnold"], 
-        quizQuestions:[
-          { timestamp:140, situation:"Team has possession, space to overlap on the wing", question:"What's Trent's best decision?", options:[
-            { text:"Overlap the winger and get to the byline", points:92, feedback:"Perfect! Creating an overload is Trent's specialty.", eliteChoice:true },
-            { text:"Stay back to cover potential counter-attack", points:72, feedback:"Too cautious. Modern full-backs contribute heavily in attack.", eliteChoice:false },
-            { text:"Cut inside and look for a long diagonal pass", points:85, feedback:"Good vision, but overlapping creates more immediate danger.", eliteChoice:false }
-          ]}
-        ]
-      },
-      { 
-        id:"defender-aggressive-1", 
-        title:"Antonio Rüdiger - Aggressive Defending", 
-        description:"Physical and intelligent defending", 
-        position:"Center Back", 
-        youtubeId:"2SRtEs7DvCo", 
-        thumbnail:"https://i.ytimg.com/vi/2SRtEs7DvCo/hqdefault.jpg", 
-        duration:"8:45", 
-        difficulty:"Advanced", 
-        keyPlayers:["Antonio Rüdiger"], 
-        quizQuestions:[
-          { timestamp:105, situation:"Attacker receiving ball with back to goal", question:"How should Rüdiger defend this?", options:[
-            { text:"Get tight immediately and apply pressure", points:94, feedback:"Perfect aggression! Rüdiger's physicality prevents the attacker from turning.", eliteChoice:true },
-            { text:"Give space and wait for them to turn", points:68, feedback:"Too passive. Allows attacker time to assess options.", eliteChoice:false },
-            { text:"Drop off slightly and cut passing lanes", points:79, feedback:"Decent positioning but doesn't use Rüdiger's physical strength advantage.", eliteChoice:false }
-          ]}
-        ]
-      }
+      { id:"center-back-1", title:"Virgil van Dijk - Center Back Masterclass", description:"Elite defensive positioning", position:"Center Back", youtubeId:"x5U41vtX_Nw", thumbnail:"https://i.ytimg.com/vi/x5U41vtX_Nw/hqdefault.jpg", duration:"10:00", difficulty:"Advanced", keyPlayers:["Virgil van Dijk"], quizQuestions:[{ timestamp:75, situation:"Striker making a run, deciding whether to step up", question:"What should Van Dijk do?", options:[{ text:"Step up aggressively to catch offside", points:89, feedback:"Excellent! Van Dijk's awareness.", eliteChoice:true },{ text:"Drop deep to cover space", points:75, feedback:"Safe but reactive.", eliteChoice:false },{ text:"Hold position and wait", points:70, feedback:"Passive approach.", eliteChoice:false }]}]}
     ]
   };
   res.json(gameLibrary);
@@ -711,7 +492,7 @@ app.get("/api/game-library", (_req, res) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 Server: http://localhost:${PORT}`);
-  console.log(`📡 Modal GPU: ${MODAL_ENDPOINT ? 'Configured ✓' : 'NOT configured ✗'}`);
-  console.log(`🔑 Anthropic: ${process.env.ANTHROPIC_API_KEY ? 'Configured ✓' : 'NOT configured ✗'}`);
-  console.log('========================================');
+  console.log(`📡 Modal GPU: ${MODAL_ENDPOINT ? '✓' : '✗'}`);
+  console.log(`🔑 Anthropic: ${process.env.ANTHROPIC_API_KEY ? '✓' : '✗'}`);
+  console.log(`🤖 Groq AI Coach: ${groq ? '✓' : '✗'}`);
 });
