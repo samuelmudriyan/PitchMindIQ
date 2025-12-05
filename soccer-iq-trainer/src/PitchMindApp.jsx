@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useUser, UserButton } from '@clerk/clerk-react';
-import { Upload, CheckCircle, AlertCircle, Loader2, Clock, Brain, Video, Zap, MousePointer, Target, Sparkles, Award, RotateCcw, Share2, Download, Save, Plus, X, ChevronRight, ChevronLeft, Home, Users, FileVideo, Lightbulb, Clipboard, FileText, BookOpen, BarChart3, TrendingUp, Bell, Settings, Search, Calendar, Edit, Trash2, Eye, PlayCircle, Send, Timer, ArrowUp, ArrowDown, ArrowRight } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, Loader2, Clock, Brain, Video, Zap, MousePointer, Target, Sparkles, Award, RotateCcw, Share2, Download, Save, Plus, X, ChevronRight, ChevronLeft, Home, Users, FileVideo, Lightbulb, Clipboard, FileText, BookOpen, BarChart3, TrendingUp, Bell, Settings, Search, Calendar, Edit, Trash2, Eye, PlayCircle, Send, Timer, ArrowUp, ArrowDown, ArrowRight, Play } from 'lucide-react';
 import logo from './assets/logo.png';
 import DrillDetailPage from './DrillDetailPage';
 import DrillsPage from './DrillsPage';
@@ -11,6 +11,75 @@ const API_BASE = 'https://pitchmind-backend-production-483d.up.railway.app';
 const STORAGE_KEYS = { PLAYERS: 'pitchmind_players', VIDEOS: 'pitchmind_videos', SESSIONS: 'pitchmind_sessions', REPORTS: 'pitchmind_reports', CHAT_HISTORY: 'pitchmind_chat_history' };
 const loadFromStorage = (key, defaultValue = []) => { try { const saved = localStorage.getItem(key); return saved ? JSON.parse(saved) : defaultValue; } catch { return defaultValue; } };
 const saveToStorage = (key, data) => { localStorage.setItem(key, JSON.stringify(data)); };
+
+// ============================================
+// TIMESTAMP UTILITIES
+// ============================================
+
+// Convert "2:34" or "12:05" to seconds
+const timestampToSeconds = (timestamp) => {
+  const parts = timestamp.split(':').map(Number);
+  if (parts.length === 2) {
+    return parts[0] * 60 + parts[1]; // MM:SS
+  } else if (parts.length === 3) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2]; // HH:MM:SS
+  }
+  return 0;
+};
+
+// Format seconds to "M:SS" or "H:MM:SS"
+const formatTime = (seconds) => {
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  if (hrs > 0) {
+    return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
+
+// Parse text and make timestamps clickable
+const parseTimestamps = (text, onTimestampClick) => {
+  // Match patterns like 0:34, 2:34, 12:05, 1:23:45
+  const timestampRegex = /\b(\d{1,2}:\d{2}(?::\d{2})?)\b/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = timestampRegex.exec(text)) !== null) {
+    // Add text before the timestamp
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    
+    // Add clickable timestamp
+    const timestamp = match[1];
+    const seconds = timestampToSeconds(timestamp);
+    parts.push(
+      <button
+        key={match.index}
+        onClick={() => onTimestampClick(seconds)}
+        className="inline-flex items-center space-x-1 px-2 py-0.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 hover:text-emerald-300 rounded-md font-mono text-sm font-medium transition-all cursor-pointer border border-emerald-500/30 hover:border-emerald-500/50"
+      >
+        <Play className="w-3 h-3" />
+        <span>{timestamp}</span>
+      </button>
+    );
+    
+    lastIndex = match.index + match[0].length;
+  }
+  
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  
+  return parts.length > 0 ? parts : text;
+};
+
+// ============================================
+// COMPONENTS
+// ============================================
 
 // Logo Component
 const Logo = ({ size = 'md' }) => {
@@ -100,6 +169,118 @@ const EmptyState = ({ icon: Icon, title, description, actionLabel, onAction }) =
     {actionLabel && <button onClick={onAction} className="flex items-center space-x-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl font-semibold transition-all"><span>{actionLabel}</span></button>}
   </div>
 );
+
+// ============================================
+// DECISION POINT CARD WITH CLICKABLE TIMESTAMPS
+// ============================================
+const DecisionPointCard = ({ point, index, videoRef, isActive, onClick }) => {
+  const handleTimestampClick = (seconds) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = seconds;
+      videoRef.current.play();
+    }
+  };
+
+  // Determine the type/severity for styling
+  const getTypeStyles = (type) => {
+    const lowerType = (type || '').toLowerCase();
+    if (lowerType.includes('goal') || lowerType.includes('chance') || lowerType.includes('opportunity')) {
+      return { bg: 'bg-amber-500/20', border: 'border-amber-500/30', icon: '⚽', color: 'text-amber-400' };
+    }
+    if (lowerType.includes('defensive') || lowerType.includes('mistake') || lowerType.includes('error')) {
+      return { bg: 'bg-red-500/20', border: 'border-red-500/30', icon: '🛡️', color: 'text-red-400' };
+    }
+    if (lowerType.includes('pass') || lowerType.includes('assist')) {
+      return { bg: 'bg-blue-500/20', border: 'border-blue-500/30', icon: '🎯', color: 'text-blue-400' };
+    }
+    if (lowerType.includes('press') || lowerType.includes('tactical')) {
+      return { bg: 'bg-purple-500/20', border: 'border-purple-500/30', icon: '📋', color: 'text-purple-400' };
+    }
+    return { bg: 'bg-emerald-500/20', border: 'border-emerald-500/30', icon: '💡', color: 'text-emerald-400' };
+  };
+
+  const styles = getTypeStyles(point.type || point.scenario_type);
+
+  return (
+    <div 
+      onClick={onClick}
+      className={`p-4 rounded-xl border transition-all cursor-pointer ${
+        isActive 
+          ? `${styles.bg} ${styles.border} ring-2 ring-emerald-500/50` 
+          : 'bg-white/5 border-white/10 hover:border-white/20 hover:bg-white/10'
+      }`}
+    >
+      <div className="flex items-start space-x-3">
+        <div className={`text-2xl`}>{styles.icon}</div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between mb-2">
+            <span className={`text-sm font-semibold ${styles.color}`}>
+              {point.type || point.scenario_type || `Decision Point ${index + 1}`}
+            </span>
+            {point.timestamp && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleTimestampClick(timestampToSeconds(point.timestamp));
+                }}
+                className="flex items-center space-x-1 px-2 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-lg text-sm font-mono transition-all"
+              >
+                <Play className="w-3 h-3" />
+                <span>{point.timestamp}</span>
+              </button>
+            )}
+          </div>
+          
+          {/* Description with clickable timestamps */}
+          <p className="text-gray-300 text-sm leading-relaxed">
+            {parseTimestamps(point.description || point.analysis || '', handleTimestampClick)}
+          </p>
+          
+          {/* What player did */}
+          {point.player_action && (
+            <div className="mt-3 p-3 bg-white/5 rounded-lg">
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Player Action</p>
+              <p className="text-gray-300 text-sm">
+                {parseTimestamps(point.player_action, handleTimestampClick)}
+              </p>
+            </div>
+          )}
+          
+          {/* AI Recommendation */}
+          {point.recommendation && (
+            <div className="mt-3 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+              <p className="text-xs text-emerald-400 uppercase tracking-wider mb-1">💡 Better Option</p>
+              <p className="text-emerald-300 text-sm">
+                {parseTimestamps(point.recommendation, handleTimestampClick)}
+              </p>
+            </div>
+          )}
+          
+          {/* Rating if available */}
+          {point.rating !== undefined && (
+            <div className="mt-3 flex items-center space-x-2">
+              <span className="text-xs text-gray-500">Decision Rating:</span>
+              <div className="flex items-center space-x-1">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <span 
+                    key={star} 
+                    className={star <= point.rating ? 'text-amber-400' : 'text-gray-600'}
+                  >
+                    ★
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================
+// MAIN APP
+// ============================================
 
 export default function PitchMindApp() {
   const { user } = useUser();
@@ -358,64 +539,291 @@ export default function PitchMindApp() {
     );
   };
 
-  // UPLOAD PAGE (simplified for space)
-  const handleFileSelect = (e) => { const file = e.target.files[0]; if (file && file.type.startsWith('video/')) { setVideoFile(file); setVideoUrl(URL.createObjectURL(file)); setUploadState('selecting'); setClickPosition(null); setError(null); } };
-  const handleVideoClick = (e) => { if (uploadState !== 'selecting') return; const video = videoRef.current; const rect = video.getBoundingClientRect(); const x = ((e.clientX - rect.left) / rect.width) * video.videoWidth; const y = ((e.clientY - rect.top) / rect.height) * video.videoHeight; const timestamp = video.currentTime; setClickPosition({ x, y, timestamp, displayX: e.clientX - rect.left, displayY: e.clientY - rect.top }); };
-  const formatTime = (seconds) => { const mins = Math.floor(seconds / 60); const secs = Math.floor(seconds % 60); return `${mins}:${secs.toString().padStart(2, '0')}`; };
-  const resetUpload = () => { setUploadState('idle'); setVideoFile(null); setVideoUrl(null); setClickPosition(null); setAnalysisResults(null); setCurrentDecisionIndex(0); setQuizAnswers([]); setError(null); setUploadProgress(0); };
+  // ============================================
+  // UPLOAD PAGE WITH CLICKABLE TIMESTAMPS
+  // ============================================
+  
+  const handleFileSelect = (e) => { 
+    const file = e.target.files[0]; 
+    if (file && file.type.startsWith('video/')) { 
+      setVideoFile(file); 
+      setVideoUrl(URL.createObjectURL(file)); 
+      setUploadState('selecting'); 
+      setClickPosition(null); 
+      setError(null); 
+    } 
+  };
+  
+  const handleVideoClick = (e) => { 
+    if (uploadState !== 'selecting') return; 
+    const video = videoRef.current; 
+    const rect = video.getBoundingClientRect(); 
+    const x = ((e.clientX - rect.left) / rect.width) * video.videoWidth; 
+    const y = ((e.clientY - rect.top) / rect.height) * video.videoHeight; 
+    const timestamp = video.currentTime; 
+    setClickPosition({ x, y, timestamp, displayX: e.clientX - rect.left, displayY: e.clientY - rect.top }); 
+  };
+  
+  const resetUpload = () => { 
+    setUploadState('idle'); 
+    setVideoFile(null); 
+    setVideoUrl(null); 
+    setClickPosition(null); 
+    setAnalysisResults(null); 
+    setCurrentDecisionIndex(0); 
+    setQuizAnswers([]); 
+    setError(null); 
+    setUploadProgress(0); 
+  };
   
   const startAnalysis = async () => {
     if (videoRef.current) videoRef.current.pause();
     if (!videoFile || !clickPosition) return;
     setUploadState('uploading'); setUploadProgress(0); setError(null);
     try {
-      const formData = new FormData(); formData.append('video', videoFile); formData.append('clickX', Math.round(clickPosition.x)); formData.append('clickY', Math.round(clickPosition.y)); formData.append('clickTimestamp', clickPosition.timestamp || 0);
-      const progressInterval = setInterval(() => { setUploadProgress(prev => prev >= 90 ? (clearInterval(progressInterval), 90) : prev + 10); }, 200);
+      const formData = new FormData(); 
+      formData.append('video', videoFile); 
+      formData.append('clickX', Math.round(clickPosition.x)); 
+      formData.append('clickY', Math.round(clickPosition.y)); 
+      formData.append('clickTimestamp', clickPosition.timestamp || 0);
+      const progressInterval = setInterval(() => { 
+        setUploadProgress(prev => prev >= 90 ? (clearInterval(progressInterval), 90) : prev + 10); 
+      }, 200);
       setUploadState('analyzing');
       const response = await fetch(`${API_BASE}/api/analyze`, { method: 'POST', body: formData });
-      clearInterval(progressInterval); setUploadProgress(100);
+      clearInterval(progressInterval); 
+      setUploadProgress(100);
       if (!response.ok) throw new Error('Analysis failed');
       const results = await response.json();
       setAnalysisResults(results);
-      const newVideo = { id: Date.now(), title: videoFile.name.replace(/\.[^/.]+$/, ''), date: new Date().toISOString().split('T')[0], duration: videoRef.current ? formatTime(videoRef.current.duration) : '00:00', decisions: results.decision_points?.length || 0 };
+      const newVideo = { 
+        id: Date.now(), 
+        title: videoFile.name.replace(/\.[^/.]+$/, ''), 
+        date: new Date().toISOString().split('T')[0], 
+        duration: videoRef.current ? formatTime(videoRef.current.duration) : '00:00', 
+        decisions: results.decision_points?.length || 0 
+      };
       setVideos([newVideo, ...videos]);
-      setUploadState('complete'); setCurrentDecisionIndex(0); setQuizAnswers([]);
-    } catch (err) { setError(err.message || 'Something went wrong'); setUploadState('selecting'); }
+      setUploadState('complete'); 
+      setCurrentDecisionIndex(0); 
+      setQuizAnswers([]);
+    } catch (err) { 
+      setError(err.message || 'Something went wrong'); 
+      setUploadState('selecting'); 
+    }
+  };
+
+  // Handle timestamp click - seek video to that time
+  const handleTimestampClick = (seconds) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = seconds;
+      videoRef.current.play();
+    }
   };
 
   const UploadPage = () => (
     <div className={`pt-16 min-h-screen bg-[#0a0f0d] transition-all duration-300 ${sidebarCollapsed ? 'ml-20' : 'ml-64'}`}>
       <TopBar title="Upload Video" sidebarCollapsed={sidebarCollapsed} currentPage="upload" setCurrentPage={setCurrentPage} />
       <div className="p-8">
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-6xl mx-auto">
+          {/* IDLE STATE - File Selection */}
           {uploadState === 'idle' && (
             <div onClick={() => fileInputRef.current?.click()} className="group bg-white/5 border-2 border-dashed border-white/20 hover:border-emerald-500/50 rounded-3xl p-16 text-center cursor-pointer transition-all hover:bg-emerald-500/5">
               <input ref={fileInputRef} type="file" accept="video/*" onChange={handleFileSelect} className="hidden" />
               <div className="inline-flex p-6 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 mb-6 group-hover:scale-110 transition-all"><Upload className="w-12 h-12 text-emerald-400" /></div>
               <h2 className="text-2xl font-bold text-white mb-2">Upload Match Footage</h2>
               <p className="text-gray-400 mb-8">Drag and drop or click to select</p>
-              <div className="flex items-center justify-center space-x-8 text-sm text-gray-500"><span className="flex items-center space-x-2"><Video className="w-4 h-4 text-emerald-400" /><span>MP4, MOV, AVI</span></span><span className="flex items-center space-x-2"><Clock className="w-4 h-4 text-emerald-400" /><span>Up to 10 min</span></span></div>
+              <div className="flex items-center justify-center space-x-8 text-sm text-gray-500">
+                <span className="flex items-center space-x-2"><Video className="w-4 h-4 text-emerald-400" /><span>MP4, MOV, AVI</span></span>
+                <span className="flex items-center space-x-2"><Clock className="w-4 h-4 text-emerald-400" /><span>Up to 10 min</span></span>
+              </div>
             </div>
           )}
+
+          {/* SELECTING STATE - Player Selection */}
           {uploadState === 'selecting' && videoUrl && (
             <div className="bg-white/5 border border-white/10 rounded-3xl overflow-hidden">
-              <div className="bg-gradient-to-r from-emerald-500/20 to-emerald-600/20 border-b border-emerald-500/20 px-6 py-4"><div className="flex items-center space-x-2 text-emerald-400"><MousePointer className="w-5 h-5" /><h2 className="text-lg font-bold">Click on the player you want to track</h2></div></div>
-              <div className="relative bg-black"><video ref={videoRef} src={videoUrl} className="w-full cursor-crosshair" controls onClick={handleVideoClick} />{clickPosition && <div className="absolute w-14 h-14 border-4 border-emerald-400 rounded-full animate-pulse pointer-events-none" style={{ left: clickPosition.displayX - 28, top: clickPosition.displayY - 28 }}><div className="absolute inset-2 bg-emerald-400/30 rounded-full" /></div>}</div>
-              <div className="p-6 bg-white/5 border-t border-white/10"><div className="flex items-center justify-between"><div>{clickPosition ? <div className="flex items-center space-x-2 text-emerald-400"><CheckCircle className="w-5 h-5" /><span className="font-semibold">Player selected!</span></div> : <div className="flex items-center space-x-2 text-amber-400"><AlertCircle className="w-5 h-5" /><span>Click on a player</span></div>}</div><div className="flex space-x-3"><button onClick={resetUpload} className="px-5 py-2.5 border border-white/20 text-gray-300 rounded-xl font-medium hover:bg-white/5">Cancel</button><button onClick={startAnalysis} disabled={!clickPosition} className={`px-6 py-2.5 rounded-xl font-semibold flex items-center space-x-2 ${clickPosition ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-lg' : 'bg-white/10 text-gray-500 cursor-not-allowed'}`}><Brain className="w-5 h-5" /><span>Start Analysis</span></button></div></div>{error && <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 flex items-center space-x-2"><AlertCircle className="w-5 h-5" /><span>{error}</span></div>}</div>
+              <div className="bg-gradient-to-r from-emerald-500/20 to-emerald-600/20 border-b border-emerald-500/20 px-6 py-4">
+                <div className="flex items-center space-x-2 text-emerald-400">
+                  <MousePointer className="w-5 h-5" />
+                  <h2 className="text-lg font-bold">Click on the player you want to track</h2>
+                </div>
+              </div>
+              <div className="relative bg-black">
+                <video ref={videoRef} src={videoUrl} className="w-full cursor-crosshair" controls onClick={handleVideoClick} />
+                {clickPosition && (
+                  <div className="absolute w-14 h-14 border-4 border-emerald-400 rounded-full animate-pulse pointer-events-none" style={{ left: clickPosition.displayX - 28, top: clickPosition.displayY - 28 }}>
+                    <div className="absolute inset-2 bg-emerald-400/30 rounded-full" />
+                  </div>
+                )}
+              </div>
+              <div className="p-6 bg-white/5 border-t border-white/10">
+                <div className="flex items-center justify-between">
+                  <div>
+                    {clickPosition ? (
+                      <div className="flex items-center space-x-2 text-emerald-400">
+                        <CheckCircle className="w-5 h-5" />
+                        <span className="font-semibold">Player selected at {formatTime(clickPosition.timestamp)}</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center space-x-2 text-amber-400">
+                        <AlertCircle className="w-5 h-5" />
+                        <span>Click on a player in the video</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex space-x-3">
+                    <button onClick={resetUpload} className="px-5 py-2.5 border border-white/20 text-gray-300 rounded-xl font-medium hover:bg-white/5">Cancel</button>
+                    <button onClick={startAnalysis} disabled={!clickPosition} className={`px-6 py-2.5 rounded-xl font-semibold flex items-center space-x-2 ${clickPosition ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-lg' : 'bg-white/10 text-gray-500 cursor-not-allowed'}`}>
+                      <Brain className="w-5 h-5" />
+                      <span>Start Analysis</span>
+                    </button>
+                  </div>
+                </div>
+                {error && (
+                  <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 flex items-center space-x-2">
+                    <AlertCircle className="w-5 h-5" />
+                    <span>{error}</span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
+
+          {/* UPLOADING/ANALYZING STATE */}
           {['uploading', 'analyzing'].includes(uploadState) && (
             <div className="bg-white/5 border border-white/10 rounded-3xl p-12 text-center">
-              <div className="inline-flex p-6 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 mb-6"><Loader2 className="w-12 h-12 text-emerald-400 animate-spin" /></div>
-              <h2 className="text-2xl font-bold text-white mb-2">{uploadState === 'uploading' ? 'Uploading...' : 'AI Analyzing...'}</h2>
-              <p className="text-gray-400 mb-8">{uploadState === 'uploading' ? 'Sending to GPU servers' : 'Tracking player movements'}</p>
-              <div className="max-w-md mx-auto"><div className="h-2 bg-white/10 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full" style={{ width: `${uploadState === 'analyzing' ? 100 : uploadProgress}%` }} /></div></div>
+              <div className="inline-flex p-6 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 mb-6">
+                <Loader2 className="w-12 h-12 text-emerald-400 animate-spin" />
+              </div>
+              <h2 className="text-2xl font-bold text-white mb-2">
+                {uploadState === 'uploading' ? 'Uploading...' : 'AI Analyzing...'}
+              </h2>
+              <p className="text-gray-400 mb-8">
+                {uploadState === 'uploading' ? 'Sending to GPU servers' : 'Tracking player movements and identifying key decisions'}
+              </p>
+              <div className="max-w-md mx-auto">
+                <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all duration-300" style={{ width: `${uploadState === 'analyzing' ? 100 : uploadProgress}%` }} />
+                </div>
+              </div>
             </div>
           )}
+
+          {/* COMPLETE STATE - Results with Clickable Timestamps */}
           {uploadState === 'complete' && analysisResults && (
             <div className="space-y-6">
-              <div className="bg-gradient-to-r from-emerald-500/20 to-emerald-600/20 border border-emerald-500/30 rounded-2xl p-6"><div className="flex items-center justify-between"><div><div className="flex items-center space-x-2 mb-2"><Sparkles className="w-5 h-5 text-emerald-400" /><h2 className="text-xl font-bold text-white">Analysis Complete!</h2></div><p className="text-gray-400">Found {analysisResults.decision_points?.length || 0} key decision moments</p></div></div></div>
-              <div className="flex items-center justify-between bg-white/5 border border-white/10 rounded-xl p-4"><button onClick={resetUpload} className="flex items-center space-x-2 px-4 py-2 text-gray-400 hover:text-white"><RotateCcw className="w-4 h-4" /><span>Analyze Another</span></button><div className="flex space-x-3"><button className="flex items-center space-x-2 px-5 py-2.5 border border-white/20 text-gray-300 rounded-xl"><Share2 className="w-4 h-4" /><span>Share</span></button><button className="flex items-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded-xl font-semibold"><Download className="w-4 h-4" /><span>Export</span></button></div></div>
+              {/* Success Header */}
+              <div className="bg-gradient-to-r from-emerald-500/20 to-emerald-600/20 border border-emerald-500/30 rounded-2xl p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center space-x-2 mb-2">
+                      <Sparkles className="w-5 h-5 text-emerald-400" />
+                      <h2 className="text-xl font-bold text-white">Analysis Complete!</h2>
+                    </div>
+                    <p className="text-gray-400">
+                      Found {analysisResults.decision_points?.length || 0} key decision moments. 
+                      Click any timestamp to jump to that moment in the video.
+                    </p>
+                  </div>
+                  <div className="flex space-x-3">
+                    <button onClick={resetUpload} className="flex items-center space-x-2 px-4 py-2 text-gray-400 hover:text-white border border-white/20 rounded-xl hover:bg-white/5">
+                      <RotateCcw className="w-4 h-4" />
+                      <span>New Analysis</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Main Content - Video + Decision Points */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Video Player */}
+                <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+                  <div className="bg-white/5 px-4 py-3 border-b border-white/10">
+                    <h3 className="font-semibold text-white flex items-center space-x-2">
+                      <Video className="w-4 h-4 text-emerald-400" />
+                      <span>Video Playback</span>
+                    </h3>
+                  </div>
+                  <div className="relative bg-black">
+                    <video 
+                      ref={videoRef} 
+                      src={videoUrl} 
+                      className="w-full" 
+                      controls 
+                    />
+                  </div>
+                  <div className="p-4 bg-white/5">
+                    <p className="text-sm text-gray-400">
+                      💡 <span className="text-emerald-400">Pro tip:</span> Click the green timestamps below to jump directly to each decision moment
+                    </p>
+                  </div>
+                </div>
+
+                {/* Decision Points List */}
+                <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden flex flex-col max-h-[600px]">
+                  <div className="bg-white/5 px-4 py-3 border-b border-white/10 flex-shrink-0">
+                    <h3 className="font-semibold text-white flex items-center space-x-2">
+                      <Brain className="w-4 h-4 text-emerald-400" />
+                      <span>Decision Points ({analysisResults.decision_points?.length || 0})</span>
+                    </h3>
+                  </div>
+                  <div className="p-4 space-y-3 overflow-y-auto flex-1">
+                    {analysisResults.decision_points && analysisResults.decision_points.length > 0 ? (
+                      analysisResults.decision_points.map((point, index) => (
+                        <DecisionPointCard
+                          key={index}
+                          point={point}
+                          index={index}
+                          videoRef={videoRef}
+                          isActive={currentDecisionIndex === index}
+                          onClick={() => {
+                            setCurrentDecisionIndex(index);
+                            if (point.timestamp) {
+                              handleTimestampClick(timestampToSeconds(point.timestamp));
+                            }
+                          }}
+                        />
+                      ))
+                    ) : (
+                      <div className="text-center py-8">
+                        <p className="text-gray-400">No decision points found in this analysis.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Summary Stats */}
+              {analysisResults.summary && (
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                  <h3 className="font-semibold text-white mb-4 flex items-center space-x-2">
+                    <BarChart3 className="w-5 h-5 text-emerald-400" />
+                    <span>Analysis Summary</span>
+                  </h3>
+                  <p className="text-gray-300 leading-relaxed">
+                    {parseTimestamps(analysisResults.summary, handleTimestampClick)}
+                  </p>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-between bg-white/5 border border-white/10 rounded-xl p-4">
+                <button onClick={resetUpload} className="flex items-center space-x-2 px-4 py-2 text-gray-400 hover:text-white">
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Analyze Another Video</span>
+                </button>
+                <div className="flex space-x-3">
+                  <button className="flex items-center space-x-2 px-5 py-2.5 border border-white/20 text-gray-300 rounded-xl hover:bg-white/5">
+                    <Share2 className="w-4 h-4" />
+                    <span>Share</span>
+                  </button>
+                  <button className="flex items-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded-xl font-semibold">
+                    <Download className="w-4 h-4" />
+                    <span>Export Report</span>
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
