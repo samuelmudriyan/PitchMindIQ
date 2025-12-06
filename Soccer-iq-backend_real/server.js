@@ -28,7 +28,8 @@ app.use(cors({
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // File upload config
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -40,7 +41,7 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
 });
-const upload = multer({ storage, limits: { fileSize: 500 * 1024 * 1024 } });
+const upload = multer({ storage, limits: { fileSize: 2000 * 1024 * 1024 } }); // 2GB limit
 
 // Health check
 app.get('/', (req, res) => {
