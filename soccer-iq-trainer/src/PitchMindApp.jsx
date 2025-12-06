@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useUser, UserButton } from '@clerk/clerk-react';
-import { Upload, CheckCircle, AlertCircle, Loader2, Clock, Brain, Video, Zap, MousePointer, Target, Sparkles, Award, RotateCcw, Share2, Download, Save, Plus, X, ChevronRight, ChevronLeft, Home, Users, FileVideo, Lightbulb, Clipboard, FileText, BookOpen, BarChart3, TrendingUp, Bell, Settings, Search, Calendar, Edit, Trash2, Eye, PlayCircle, Send, Timer, ArrowUp, ArrowDown, ArrowRight, Play, Pause, StopCircle, User, Hash, Palette } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, Loader2, Clock, Brain, Video, Zap, MousePointer, Target, Sparkles, Award, RotateCcw, Share2, Download, Save, Plus, X, ChevronRight, ChevronLeft, Home, Users, FileVideo, Lightbulb, Clipboard, FileText, BookOpen, BarChart3, TrendingUp, Bell, Settings, Search, Calendar, Edit, Trash2, Eye, PlayCircle, Send, Timer, ArrowUp, ArrowDown, ArrowRight, Play, Pause, StopCircle, User, Hash, Palette, Link2, RefreshCw, Check } from 'lucide-react';
 import logo from './assets/logo.png';
 import DrillDetailPage from './DrillDetailPage';
 import DrillsPage from './DrillsPage';
@@ -604,6 +604,11 @@ export default function PitchMindApp() {
   const [selectedDrill, setSelectedDrill] = useState(null);
   const [selectedDrillId, setSelectedDrillId] = useState(null);
   
+  // TeamSnap integration state
+  const [teamsnapToken, setTeamsnapToken] = useState(() => localStorage.getItem('teamsnap_token'));
+  const [teamsnapTeams, setTeamsnapTeams] = useState([]);
+  const [teamsnapLoading, setTeamsnapLoading] = useState(false);
+  
   const videoRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -612,6 +617,123 @@ export default function PitchMindApp() {
   useEffect(() => { saveToStorage(STORAGE_KEYS.SESSIONS, sessions); }, [sessions]);
   useEffect(() => { saveToStorage(STORAGE_KEYS.REPORTS, reports); }, [reports]);
   useEffect(() => { saveToStorage(STORAGE_KEYS.CHAT_HISTORY, chatHistory); }, [chatHistory]);
+
+  // TeamSnap OAuth callback handler
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('teamsnap_token');
+    const error = params.get('teamsnap_error');
+    
+    if (token) {
+      setTeamsnapToken(token);
+      localStorage.setItem('teamsnap_token', token);
+      window.history.replaceState({}, '', window.location.pathname);
+      setShowModal('teamsnapImport');
+    }
+    
+    if (error) {
+      console.error('TeamSnap error:', error);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
+  // TeamSnap functions
+  const connectTeamSnap = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/teamsnap/auth`);
+      const data = await response.json();
+      if (data.authUrl) {
+        window.location.href = data.authUrl;
+      } else {
+        alert('TeamSnap integration not configured. Add credentials to backend.');
+      }
+    } catch (err) {
+      console.error('TeamSnap auth error:', err);
+    }
+  };
+
+  const fetchTeamsnapTeams = async () => {
+    if (!teamsnapToken) return;
+    setTeamsnapLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/teamsnap/teams`, {
+        headers: { 'Authorization': `Bearer ${teamsnapToken}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setTeamsnapTeams(data.teams || []);
+      } else if (response.status === 401) {
+        localStorage.removeItem('teamsnap_token');
+        setTeamsnapToken(null);
+      }
+    } catch (err) {
+      console.error('Failed to fetch teams:', err);
+    }
+    setTeamsnapLoading(false);
+  };
+
+  const fetchTeamsnapRoster = async (teamId) => {
+    if (!teamsnapToken) return [];
+    try {
+      const response = await fetch(`${API_BASE}/api/teamsnap/roster/${teamId}`, {
+        headers: { 'Authorization': `Bearer ${teamsnapToken}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return data.players || [];
+      }
+    } catch (err) {
+      console.error('Failed to fetch roster:', err);
+    }
+    return [];
+  };
+
+  const importTeamsnapPlayers = (teamsnapPlayers, selectedIds) => {
+    const toImport = teamsnapPlayers.filter(p => selectedIds.includes(p.id));
+    const newPlayers = toImport.map(p => ({
+      id: Date.now() + Math.random(),
+      name: p.name,
+      position: mapTeamsnapPosition(p.position),
+      age: p.birthday ? calculateTeamsnapAge(p.birthday) : 0,
+      jerseyNumber: p.jerseyNumber,
+      jerseyColor: '#10b981',
+      rating: 70,
+      trend: 'same',
+      avatar: p.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2),
+      createdAt: new Date().toISOString(),
+      analyses: [],
+      importedFrom: 'teamsnap',
+      teamsnapId: p.id
+    }));
+    const existingIds = players.filter(p => p.teamsnapId).map(p => p.teamsnapId);
+    const uniquePlayers = newPlayers.filter(p => !existingIds.includes(p.teamsnapId));
+    setPlayers([...players, ...uniquePlayers]);
+    return uniquePlayers.length;
+  };
+
+  const mapTeamsnapPosition = (pos) => {
+    if (!pos) return 'Midfielder';
+    const p = pos.toLowerCase();
+    if (p.includes('goal') || p.includes('keeper')) return 'Goalkeeper';
+    if (p.includes('def') || p.includes('back')) return 'Defender';
+    if (p.includes('forward') || p.includes('striker') || p.includes('wing')) return 'Forward';
+    return 'Midfielder';
+  };
+
+  const calculateTeamsnapAge = (birthday) => {
+    if (!birthday) return 0;
+    const birth = new Date(birthday);
+    const today = new Date();
+    let age = today.getFullYear() - birth.getFullYear();
+    if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age--;
+    return age > 0 ? age : 0;
+  };
+
+  const disconnectTeamSnap = () => {
+    localStorage.removeItem('teamsnap_token');
+    setTeamsnapToken(null);
+    setTeamsnapTeams([]);
+  };
 
   useEffect(() => { return () => { if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current); }; }, []);
 
@@ -705,6 +827,20 @@ export default function PitchMindApp() {
     return (
       <Modal title={editingItem ? 'Edit Player' : 'Add New Player'} onClose={() => { setShowModal(null); setEditingItem(null); }} wide>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {!editingItem && (
+            <div className="mb-4">
+              {teamsnapToken ? (
+                <button type="button" onClick={() => setShowModal('teamsnapImport')} className="w-full flex items-center justify-center space-x-3 p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl text-blue-400 hover:bg-blue-500/20 transition-all">
+                  <Link2 className="w-5 h-5" /><span className="font-semibold">Import from TeamSnap</span>
+                </button>
+              ) : (
+                <button type="button" onClick={connectTeamSnap} className="w-full flex items-center justify-center space-x-3 p-4 bg-white/5 border border-white/10 rounded-xl text-gray-300 hover:border-blue-500/30 hover:bg-blue-500/5 transition-all">
+                  <Link2 className="w-5 h-5" /><span>Connect TeamSnap to import roster</span>
+                </button>
+              )}
+              <div className="flex items-center my-4"><div className="flex-1 border-t border-white/10"></div><span className="px-4 text-gray-500 text-sm">or add manually</span><div className="flex-1 border-t border-white/10"></div></div>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
               <label className="block text-sm font-medium text-gray-400 mb-2">Full Name *</label>
@@ -947,6 +1083,105 @@ export default function PitchMindApp() {
         <div className="mb-4 p-4 bg-white/5 rounded-xl"><div className="flex items-center space-x-3"><span className="text-2xl">{drill.icon}</span><div><h4 className="font-bold text-white">{drill.name}</h4><p className="text-gray-400 text-sm">{drill.category} • {drill.duration}</p></div></div></div>
         {sessions.length === 0 ? <div className="text-center py-8"><p className="text-gray-400 mb-4">No sessions created yet.</p><button onClick={() => { setShowModal('session'); setSelectedDrill(null); }} className="px-4 py-2 bg-emerald-500 text-white rounded-lg font-medium">Create a Session First</button></div>
         : <div className="space-y-2"><p className="text-sm text-gray-400 mb-3">Select a session:</p>{sessions.map(session => (<button key={session.id} onClick={() => handleAddToSession(session.id)} className="w-full p-4 bg-white/5 border border-white/10 rounded-xl text-left hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-all group"><div className="flex items-center justify-between"><div><h4 className="font-medium text-white group-hover:text-emerald-400">{session.title}</h4><p className="text-gray-500 text-sm">{session.date} at {session.time}</p></div><Plus className="w-5 h-5 text-gray-400 group-hover:text-emerald-400" /></div></button>))}</div>}
+      </Modal>
+    );
+  };
+
+  // TeamSnap Import Modal
+  const TeamSnapImportModal = () => {
+    const [step, setStep] = useState('teams');
+    const [selectedTeam, setSelectedTeam] = useState(null);
+    const [roster, setRoster] = useState([]);
+    const [selectedPlayers, setSelectedPlayers] = useState([]);
+    const [loadingRoster, setLoadingRoster] = useState(false);
+    const [importedCount, setImportedCount] = useState(0);
+    
+    useEffect(() => {
+      if (teamsnapToken && teamsnapTeams.length === 0) fetchTeamsnapTeams();
+    }, [teamsnapToken]);
+    
+    const handleSelectTeam = async (team) => {
+      setSelectedTeam(team);
+      setLoadingRoster(true);
+      const players = await fetchTeamsnapRoster(team.id);
+      setRoster(players);
+      setSelectedPlayers(players.map(p => p.id));
+      setLoadingRoster(false);
+      setStep('roster');
+    };
+    
+    const togglePlayer = (id) => setSelectedPlayers(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    const toggleAll = () => setSelectedPlayers(selectedPlayers.length === roster.length ? [] : roster.map(p => p.id));
+    
+    const handleImport = () => {
+      setStep('importing');
+      setTimeout(() => {
+        const count = importTeamsnapPlayers(roster, selectedPlayers);
+        setImportedCount(count);
+        setStep('done');
+      }, 1000);
+    };
+    
+    return (
+      <Modal title="Import from TeamSnap" onClose={() => setShowModal(null)} wide>
+        {step === 'teams' && (
+          <div className="space-y-4">
+            <div className="flex items-center space-x-3 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+              <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center"><Check className="w-5 h-5 text-emerald-400" /></div>
+              <div><p className="font-semibold text-white">Connected to TeamSnap</p><p className="text-sm text-gray-400">Select a team to import players</p></div>
+            </div>
+            {teamsnapLoading ? (
+              <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 text-emerald-400 animate-spin" /></div>
+            ) : teamsnapTeams.length === 0 ? (
+              <div className="text-center py-12"><Users className="w-12 h-12 text-gray-500 mx-auto mb-3" /><p className="text-gray-400">No teams found</p><button onClick={fetchTeamsnapTeams} className="mt-4 text-emerald-400 hover:underline">Refresh</button></div>
+            ) : (
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {teamsnapTeams.map(team => (
+                  <button key={team.id} onClick={() => handleSelectTeam(team)} className="w-full flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-xl hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-all text-left group">
+                    <div><p className="font-bold text-white group-hover:text-emerald-400">{team.name}</p><p className="text-gray-400 text-sm">{[team.divisionName, team.seasonName].filter(Boolean).join(' • ')}</p></div>
+                    <ChevronRight className="w-5 h-5 text-gray-500 group-hover:text-emerald-400" />
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="pt-4 border-t border-white/10 flex justify-between"><button onClick={disconnectTeamSnap} className="text-gray-400 hover:text-red-400 text-sm">Disconnect</button><button onClick={() => setShowModal(null)} className="px-4 py-2 border border-white/20 text-gray-300 rounded-xl hover:bg-white/5">Cancel</button></div>
+          </div>
+        )}
+        {step === 'roster' && (
+          <div className="space-y-4">
+            <button onClick={() => setStep('teams')} className="flex items-center space-x-2 text-gray-400 hover:text-white"><ChevronLeft className="w-4 h-4" /><span>Back</span></button>
+            <div className="p-4 bg-white/5 rounded-xl"><h3 className="font-bold text-white">{selectedTeam?.name}</h3><p className="text-gray-400 text-sm">{roster.length} players</p></div>
+            {loadingRoster ? <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 text-emerald-400 animate-spin" /></div> : roster.length === 0 ? <div className="text-center py-12 text-gray-400">No players found</div> : (
+              <>
+                <div className="flex items-center justify-between"><button onClick={toggleAll} className="text-sm text-emerald-400 hover:underline">{selectedPlayers.length === roster.length ? 'Deselect All' : 'Select All'}</button><span className="text-sm text-gray-400">{selectedPlayers.length} selected</span></div>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {roster.map(player => {
+                    const isSelected = selectedPlayers.includes(player.id);
+                    const alreadyImported = players.some(p => p.teamsnapId === player.id);
+                    return (
+                      <button key={player.id} onClick={() => !alreadyImported && togglePlayer(player.id)} disabled={alreadyImported} className={`w-full flex items-center space-x-4 p-3 rounded-xl transition-all text-left ${alreadyImported ? 'bg-white/5 opacity-50' : isSelected ? 'bg-emerald-500/20 border border-emerald-500/30' : 'bg-white/5 border border-white/10 hover:border-white/20'}`}>
+                        <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center ${isSelected ? 'bg-emerald-500 border-emerald-500' : 'border-gray-500'}`}>{isSelected && <Check className="w-4 h-4 text-white" />}</div>
+                        <JerseyBadge number={player.jerseyNumber || '?'} color="#10b981" size="sm" />
+                        <div className="flex-1"><p className="font-medium text-white">{player.name}</p><p className="text-gray-400 text-xs">{player.position || 'No position'}{player.jerseyNumber && ` • #${player.jerseyNumber}`}</p></div>
+                        {alreadyImported && <span className="text-xs text-gray-500 bg-white/10 px-2 py-1 rounded">Imported</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+            <div className="flex space-x-3 pt-4"><button onClick={() => setShowModal(null)} className="flex-1 py-3 border border-white/20 text-gray-300 rounded-xl hover:bg-white/5">Cancel</button><button onClick={handleImport} disabled={selectedPlayers.length === 0} className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:bg-gray-600 text-white rounded-xl font-semibold">Import {selectedPlayers.length} Players</button></div>
+          </div>
+        )}
+        {step === 'importing' && <div className="text-center py-12"><Loader2 className="w-12 h-12 text-emerald-400 animate-spin mx-auto mb-4" /><p className="text-white font-semibold">Importing...</p></div>}
+        {step === 'done' && (
+          <div className="text-center py-8">
+            <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4"><Check className="w-8 h-8 text-emerald-400" /></div>
+            <h3 className="text-xl font-bold text-white mb-2">Import Complete!</h3>
+            <p className="text-gray-400 mb-6">Imported {importedCount} player{importedCount !== 1 ? 's' : ''}</p>
+            <div className="flex space-x-3 justify-center"><button onClick={() => { setShowModal(null); setCurrentPage('players'); }} className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl font-semibold">View Players</button><button onClick={() => setShowModal(null)} className="px-6 py-2.5 border border-white/20 text-gray-300 rounded-xl hover:bg-white/5">Close</button></div>
+          </div>
+        )}
       </Modal>
     );
   };
@@ -1454,6 +1689,7 @@ export default function PitchMindApp() {
       {showModal === 'session' && <AddSessionModal />}
       {showModal === 'report' && <GenerateReportModal />}
       {showModal === 'addToSession' && <AddToSessionModal />}
+      {showModal === 'teamsnapImport' && <TeamSnapImportModal />}
     </div>
   );
 }
