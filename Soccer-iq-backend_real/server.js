@@ -72,29 +72,47 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
 
   try {
     const formData = new FormData();
-    formData.append('video', fs.createReadStream(req.file.path));
-    formData.append('click_x', clickX || '0');
-    formData.append('click_y', clickY || '0');
-    formData.append('click_timestamp', clickTimestamp || '0');
-
-    const response = await fetch(MODAL_ENDPOINT, {
-      method: 'POST',
-      body: formData,
-      headers: formData.getHeaders()
+    formData.append('video', fs.createReadStream(req.file.path), {
+      filename: req.file.originalname || 'video.mp4',
+      contentType: req.file.mimetype || 'video/mp4'
     });
+    formData.append('click_x', String(clickX || '0'));
+    formData.append('click_y', String(clickY || '0'));
+    formData.append('click_timestamp', String(clickTimestamp || '0'));
+
+    // Use form-data's submit method for proper multipart handling
+    const submitPromise = new Promise((resolve, reject) => {
+      formData.submit(MODAL_ENDPOINT, (err, response) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        
+        let data = '';
+        response.on('data', chunk => { data += chunk; });
+        response.on('end', () => {
+          resolve({
+            statusCode: response.statusCode,
+            body: data
+          });
+        });
+        response.on('error', reject);
+      });
+    });
+
+    const modalResponse = await submitPromise;
 
     // Clean up uploaded file
     fs.unlink(req.file.path, (err) => {
       if (err) console.error('Failed to delete temp file:', err);
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Modal error:', errorText);
-      return res.status(500).json({ error: 'Analysis failed', details: errorText });
+    if (modalResponse.statusCode !== 200) {
+      console.error('Modal error:', modalResponse.body);
+      return res.status(500).json({ error: 'Analysis failed', details: modalResponse.body });
     }
 
-    const results = await response.json();
+    const results = JSON.parse(modalResponse.body);
     console.log('Analysis complete:', results.decision_points?.length || 0, 'decision points');
     
     res.json(results);
