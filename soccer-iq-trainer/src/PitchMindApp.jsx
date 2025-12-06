@@ -8,7 +8,7 @@ import { drillsData } from './DrillData';
 
 const API_BASE = 'https://pitchmind-backend-production-483d.up.railway.app';
 
-const STORAGE_KEYS = { PLAYERS: 'pitchmind_players', VIDEOS: 'pitchmind_videos', SESSIONS: 'pitchmind_sessions', REPORTS: 'pitchmind_reports', CHAT_HISTORY: 'pitchmind_chat_history' };
+const STORAGE_KEYS = { PLAYERS: 'pitchmind_players', VIDEOS: 'pitchmind_videos', SESSIONS: 'pitchmind_sessions', REPORTS: 'pitchmind_reports', CHAT_HISTORY: 'pitchmind_chat_history', TEAMS: 'pitchmind_teams' };
 const loadFromStorage = (key, defaultValue = []) => { try { const saved = localStorage.getItem(key); return saved ? JSON.parse(saved) : defaultValue; } catch { return defaultValue; } };
 const saveToStorage = (key, data) => { localStorage.setItem(key, JSON.stringify(data)); };
 
@@ -594,6 +594,8 @@ export default function PitchMindApp() {
   const clipTimeoutRef = useRef(null);
   
   const [players, setPlayers] = useState(() => loadFromStorage(STORAGE_KEYS.PLAYERS, []));
+  const [teams, setTeams] = useState(() => loadFromStorage(STORAGE_KEYS.TEAMS, []));
+  const [selectedTeamFilter, setSelectedTeamFilter] = useState('all');
   const [videos, setVideos] = useState(() => loadFromStorage(STORAGE_KEYS.VIDEOS, []));
   const [sessions, setSessions] = useState(() => loadFromStorage(STORAGE_KEYS.SESSIONS, []));
   const [reports, setReports] = useState(() => loadFromStorage(STORAGE_KEYS.REPORTS, []));
@@ -613,6 +615,7 @@ export default function PitchMindApp() {
   const fileInputRef = useRef(null);
 
   useEffect(() => { saveToStorage(STORAGE_KEYS.PLAYERS, players); }, [players]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.TEAMS, teams); }, [teams]);
   useEffect(() => { saveToStorage(STORAGE_KEYS.VIDEOS, videos); }, [videos]);
   useEffect(() => { saveToStorage(STORAGE_KEYS.SESSIONS, sessions); }, [sessions]);
   useEffect(() => { saveToStorage(STORAGE_KEYS.REPORTS, reports); }, [reports]);
@@ -688,7 +691,7 @@ export default function PitchMindApp() {
     return [];
   };
 
-  const importTeamsnapPlayers = (teamsnapPlayers, selectedIds) => {
+  const importTeamsnapPlayers = (teamsnapPlayers, selectedIds, teamInfo) => {
     const toImport = teamsnapPlayers.filter(p => selectedIds.includes(p.id));
     const newPlayers = toImport.map(p => ({
       id: Date.now() + Math.random(),
@@ -703,11 +706,26 @@ export default function PitchMindApp() {
       createdAt: new Date().toISOString(),
       analyses: [],
       importedFrom: 'teamsnap',
-      teamsnapId: p.id
+      teamsnapId: p.id,
+      teamId: teamInfo?.id || null,
+      teamName: teamInfo?.name || 'Unassigned'
     }));
     const existingIds = players.filter(p => p.teamsnapId).map(p => p.teamsnapId);
     const uniquePlayers = newPlayers.filter(p => !existingIds.includes(p.teamsnapId));
     setPlayers([...players, ...uniquePlayers]);
+    
+    // Add team to teams list if not exists
+    if (teamInfo && !teams.find(t => t.id === teamInfo.id)) {
+      setTeams([...teams, {
+        id: teamInfo.id,
+        name: teamInfo.name,
+        divisionName: teamInfo.divisionName,
+        seasonName: teamInfo.seasonName,
+        importedAt: new Date().toISOString(),
+        source: 'teamsnap'
+      }]);
+    }
+    
     return uniquePlayers.length;
   };
 
@@ -1116,7 +1134,7 @@ export default function PitchMindApp() {
     const handleImport = () => {
       setStep('importing');
       setTimeout(() => {
-        const count = importTeamsnapPlayers(roster, selectedPlayers);
+        const count = importTeamsnapPlayers(roster, selectedPlayers, selectedTeam);
         setImportedCount(count);
         setStep('done');
       }, 1000);
@@ -1211,42 +1229,153 @@ export default function PitchMindApp() {
   // Enhanced Players Page with Jersey Info
   const PlayersPage = () => {
     const deletePlayer = (id) => { if (window.confirm('Delete this player?')) { setPlayers(players.filter(p => p.id !== id)); } };
-    const filteredPlayers = players.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.position.toLowerCase().includes(searchQuery.toLowerCase()));
+    const deleteTeam = (teamId) => { 
+      if (window.confirm('Delete this team and unassign all players from it?')) { 
+        setTeams(teams.filter(t => t.id !== teamId)); 
+        setPlayers(players.map(p => p.teamId === teamId ? {...p, teamId: null, teamName: 'Unassigned'} : p));
+        if (selectedTeamFilter === teamId) setSelectedTeamFilter('all');
+      } 
+    };
+    
+    // Filter by search and team
+    const filteredPlayers = players.filter(p => {
+      const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.position.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesTeam = selectedTeamFilter === 'all' || p.teamId === selectedTeamFilter || (selectedTeamFilter === 'unassigned' && !p.teamId);
+      return matchesSearch && matchesTeam;
+    });
+    
+    // Group players by team for display
+    const playersByTeam = {};
+    filteredPlayers.forEach(p => {
+      const teamKey = p.teamId || 'unassigned';
+      if (!playersByTeam[teamKey]) playersByTeam[teamKey] = [];
+      playersByTeam[teamKey].push(p);
+    });
+    
+    const getTeamName = (teamId) => {
+      if (teamId === 'unassigned') return 'Unassigned Players';
+      const team = teams.find(t => t.id === teamId);
+      return team?.name || 'Unknown Team';
+    };
+    
     return (
       <PageWrapper title="Player Profiles" showSearch sidebarCollapsed={sidebarCollapsed} searchQuery={searchQuery} setSearchQuery={setSearchQuery} currentPage="players" setCurrentPage={setCurrentPage}>
-        <div className="flex items-center justify-between mb-8"><div><h2 className="text-2xl font-bold text-white">Your Players</h2><p className="text-gray-400 mt-1">{players.length} player{players.length !== 1 ? 's' : ''}</p></div><button onClick={() => setShowModal('player')} className="flex items-center space-x-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl font-semibold transition-all"><Plus className="w-5 h-5" /><span>Add Player</span></button></div>
-        {players.length === 0 ? <EmptyState icon={Users} title="No players yet" description="Add your first player with jersey number and color to start tracking." actionLabel="Add Your First Player" onAction={() => setShowModal('player')} />
-        : <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">{filteredPlayers.map((player) => (
-          <div key={player.id} onClick={() => { setSelectedPlayerId(player.id); setCurrentPage('playerDetail'); }} className="bg-white/5 border border-white/10 rounded-2xl p-6 hover:border-emerald-500/30 transition-all group cursor-pointer">
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex items-center space-x-4">
-                <JerseyBadge number={player.jerseyNumber || '?'} color={player.jerseyColor} size="lg" />
-                <div>
-                  <h3 className="font-bold text-white group-hover:text-emerald-400 transition-colors">{player.name}</h3>
-                  <p className="text-gray-400 text-sm">{player.position} • Age {player.age || '?'}</p>
-                </div>
-              </div>
-              <div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-all" onClick={e => e.stopPropagation()}>
-                <button onClick={() => { setEditingItem(player); setShowModal('player'); }} className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg"><Edit className="w-4 h-4" /></button>
-                <button onClick={() => deletePlayer(player.id)} className="p-2 text-gray-400 hover:text-red-400 hover:bg-white/10 rounded-lg"><Trash2 className="w-4 h-4" /></button>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-500 text-xs uppercase tracking-wider">Decision IQ</p>
-                <div className="flex items-center space-x-2 mt-1">
-                  <span className="text-2xl font-bold text-white">{player.rating}</span>
-                  {player.trend === 'up' && <ArrowUp className="w-4 h-4 text-emerald-400" />}
-                  {player.trend === 'down' && <ArrowDown className="w-4 h-4 text-red-400" />}
-                </div>
-              </div>
-              <div className="text-right">
-                <p className="text-gray-500 text-xs uppercase tracking-wider">Sessions</p>
-                <p className="text-xl font-bold text-emerald-400 mt-1">{player.analyses?.length || 0}</p>
-              </div>
-            </div>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-white">Your Players</h2>
+            <p className="text-gray-400 mt-1">{players.length} player{players.length !== 1 ? 's' : ''} across {teams.length} team{teams.length !== 1 ? 's' : ''}</p>
           </div>
-        ))}</div>}
+          <button onClick={() => setShowModal('player')} className="flex items-center space-x-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl font-semibold transition-all"><Plus className="w-5 h-5" /><span>Add Player</span></button>
+        </div>
+        
+        {/* Team Filter Tabs */}
+        {teams.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-6">
+            <button onClick={() => setSelectedTeamFilter('all')} className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${selectedTeamFilter === 'all' ? 'bg-emerald-500 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>
+              All Teams ({players.length})
+            </button>
+            {teams.map(team => {
+              const count = players.filter(p => p.teamId === team.id).length;
+              return (
+                <button key={team.id} onClick={() => setSelectedTeamFilter(team.id)} className={`px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center space-x-2 ${selectedTeamFilter === team.id ? 'bg-emerald-500 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>
+                  <span>{team.name}</span>
+                  <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs">{count}</span>
+                </button>
+              );
+            })}
+            {players.some(p => !p.teamId) && (
+              <button onClick={() => setSelectedTeamFilter('unassigned')} className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${selectedTeamFilter === 'unassigned' ? 'bg-emerald-500 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>
+                Unassigned ({players.filter(p => !p.teamId).length})
+              </button>
+            )}
+          </div>
+        )}
+        
+        {players.length === 0 ? <EmptyState icon={Users} title="No players yet" description="Add your first player with jersey number and color to start tracking." actionLabel="Add Your First Player" onAction={() => setShowModal('player')} />
+        : selectedTeamFilter === 'all' && teams.length > 0 ? (
+          // Show grouped by team
+          <div className="space-y-8">
+            {Object.keys(playersByTeam).map(teamId => (
+              <div key={teamId}>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-3">
+                    <h3 className="text-lg font-bold text-white">{getTeamName(teamId)}</h3>
+                    <span className="text-gray-400 text-sm">({playersByTeam[teamId].length} players)</span>
+                  </div>
+                  {teamId !== 'unassigned' && (
+                    <button onClick={() => deleteTeam(teamId)} className="text-gray-500 hover:text-red-400 text-sm">Remove Team</button>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {playersByTeam[teamId].map((player) => (
+                    <div key={player.id} onClick={() => { setSelectedPlayerId(player.id); setCurrentPage('playerDetail'); }} className="bg-white/5 border border-white/10 rounded-2xl p-6 hover:border-emerald-500/30 transition-all group cursor-pointer">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center space-x-4">
+                          <JerseyBadge number={player.jerseyNumber || '?'} color={player.jerseyColor} size="lg" />
+                          <div>
+                            <h3 className="font-bold text-white group-hover:text-emerald-400 transition-colors">{player.name}</h3>
+                            <p className="text-gray-400 text-sm">{player.position} • Age {player.age || '?'}</p>
+                          </div>
+                        </div>
+                        <div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-all" onClick={e => e.stopPropagation()}>
+                          <button onClick={() => { setEditingItem(player); setShowModal('player'); }} className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg"><Edit className="w-4 h-4" /></button>
+                          <button onClick={() => deletePlayer(player.id)} className="p-2 text-gray-400 hover:text-red-400 hover:bg-white/10 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-gray-500 text-xs uppercase tracking-wider">Decision IQ</p>
+                          <div className="flex items-center space-x-2 mt-1">
+                            <span className="text-2xl font-bold text-white">{player.rating}</span>
+                            {player.trend === 'up' && <ArrowUp className="w-4 h-4 text-emerald-400" />}
+                            {player.trend === 'down' && <ArrowDown className="w-4 h-4 text-red-400" />}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-gray-500 text-xs uppercase tracking-wider">Sessions</p>
+                          <p className="text-xl font-bold text-emerald-400 mt-1">{player.analyses?.length || 0}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          // Show flat list when filtered to specific team
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">{filteredPlayers.map((player) => (
+            <div key={player.id} onClick={() => { setSelectedPlayerId(player.id); setCurrentPage('playerDetail'); }} className="bg-white/5 border border-white/10 rounded-2xl p-6 hover:border-emerald-500/30 transition-all group cursor-pointer">
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center space-x-4">
+                  <JerseyBadge number={player.jerseyNumber || '?'} color={player.jerseyColor} size="lg" />
+                  <div>
+                    <h3 className="font-bold text-white group-hover:text-emerald-400 transition-colors">{player.name}</h3>
+                    <p className="text-gray-400 text-sm">{player.position} • Age {player.age || '?'}</p>
+                  </div>
+                </div>
+                <div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-all" onClick={e => e.stopPropagation()}>
+                  <button onClick={() => { setEditingItem(player); setShowModal('player'); }} className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg"><Edit className="w-4 h-4" /></button>
+                  <button onClick={() => deletePlayer(player.id)} className="p-2 text-gray-400 hover:text-red-400 hover:bg-white/10 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-gray-500 text-xs uppercase tracking-wider">Decision IQ</p>
+                  <div className="flex items-center space-x-2 mt-1">
+                    <span className="text-2xl font-bold text-white">{player.rating}</span>
+                    {player.trend === 'up' && <ArrowUp className="w-4 h-4 text-emerald-400" />}
+                    {player.trend === 'down' && <ArrowDown className="w-4 h-4 text-red-400" />}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-gray-500 text-xs uppercase tracking-wider">Sessions</p>
+                  <p className="text-xl font-bold text-emerald-400 mt-1">{player.analyses?.length || 0}</p>
+                </div>
+              </div>
+            </div>
+          ))}</div>
+        )}
       </PageWrapper>
     );
   };
