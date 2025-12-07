@@ -1,12 +1,26 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useUser, UserButton } from '@clerk/clerk-react';
-import { Upload, CheckCircle, AlertCircle, Loader2, Clock, Brain, Video, Zap, MousePointer, Target, Sparkles, Award, RotateCcw, Share2, Download, Save, Plus, X, ChevronRight, ChevronLeft, Home, Users, FileVideo, Lightbulb, Clipboard, FileText, BookOpen, BarChart3, TrendingUp, Bell, Settings, Search, Calendar, Edit, Trash2, Eye, PlayCircle, Send, Timer, ArrowUp, ArrowDown, ArrowRight, Play, Pause, StopCircle, User, Hash, Palette, Link2, RefreshCw, Check } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, Loader2, Clock, Brain, Video, Zap, MousePointer, Target, Sparkles, Award, RotateCcw, Share2, Download, Save, Plus, X, ChevronRight, ChevronLeft, Home, Users, FileVideo, Lightbulb, Clipboard, FileText, BookOpen, BarChart3, TrendingUp, Bell, Settings, Search, Calendar, Edit, Trash2, Eye, PlayCircle, Send, Timer, ArrowUp, ArrowDown, ArrowRight, Play, Pause, StopCircle, User, Hash, Palette, Link2, RefreshCw, Check, Database } from 'lucide-react';
 import logo from './assets/logo.png';
 import DrillDetailPage from './DrillDetailPage';
 import DrillsPage from './DrillsPage';
 import { drillsData } from './DrillData';
 
 const API_BASE = 'https://pitchmind-backend-production-483d.up.railway.app';
+
+// API Helper
+const apiCall = async (endpoint, clerkUserId, options = {}) => {
+  const response = await fetch(`${API_BASE}${endpoint}`, {
+    ...options,
+    headers: {
+      'Authorization': `Bearer ${clerkUserId}`,
+      'Content-Type': 'application/json',
+      ...options.headers
+    }
+  });
+  if (!response.ok) throw new Error(`API call failed: ${response.statusText}`);
+  return response.json();
+};
 
 const STORAGE_KEYS = { PLAYERS: 'pitchmind_players', VIDEOS: 'pitchmind_videos', SESSIONS: 'pitchmind_sessions', REPORTS: 'pitchmind_reports', CHAT_HISTORY: 'pitchmind_chat_history', TEAMS: 'pitchmind_teams' };
 const loadFromStorage = (key, defaultValue = []) => { try { const saved = localStorage.getItem(key); return saved ? JSON.parse(saved) : defaultValue; } catch { return defaultValue; } };
@@ -593,13 +607,16 @@ export default function PitchMindApp() {
   const [activeClipIndex, setActiveClipIndex] = useState(null);
   const clipTimeoutRef = useRef(null);
   
-  const [players, setPlayers] = useState(() => loadFromStorage(STORAGE_KEYS.PLAYERS, []));
-  const [teams, setTeams] = useState(() => loadFromStorage(STORAGE_KEYS.TEAMS, []));
+  const [players, setPlayers] = useState([]);
+  const [teams, setTeams] = useState([]);
   const [selectedTeamFilter, setSelectedTeamFilter] = useState('all');
   const [videos, setVideos] = useState(() => loadFromStorage(STORAGE_KEYS.VIDEOS, []));
-  const [sessions, setSessions] = useState(() => loadFromStorage(STORAGE_KEYS.SESSIONS, []));
+  const [sessions, setSessions] = useState([]);
   const [reports, setReports] = useState(() => loadFromStorage(STORAGE_KEYS.REPORTS, []));
-  const [chatHistory, setChatHistory] = useState(() => loadFromStorage(STORAGE_KEYS.CHAT_HISTORY, []));
+  const [chatHistory, setChatHistory] = useState([]);
+  const [userProfile, setUserProfile] = useState(null);
+  const [dataLoading, setDataLoading] = useState(true);
+  const [dataSynced, setDataSynced] = useState(false);
   
   const [showModal, setShowModal] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
@@ -614,6 +631,49 @@ export default function PitchMindApp() {
   const videoRef = useRef(null);
   const fileInputRef = useRef(null);
 
+  // Sync data from database on mount
+  useEffect(() => {
+    if (user?.id && !dataSynced) {
+      syncDataFromDB();
+    }
+  }, [user?.id, dataSynced]);
+
+  const syncDataFromDB = async () => {
+    if (!user?.id) return;
+    setDataLoading(true);
+    try {
+      const data = await apiCall('/api/sync', user.id);
+      setUserProfile(data.user);
+      setTeams(data.teams || []);
+      setPlayers(data.players?.map(p => ({
+        ...p,
+        teamId: p.team_id,
+        teamName: p.team_name,
+        jerseyNumber: p.jersey_number,
+        jerseyColor: p.jersey_color,
+        teamsnapId: p.teamsnap_id,
+        importedFrom: p.imported_from,
+        analyses: []
+      })) || []);
+      setSessions(data.sessions?.map(s => ({
+        ...s,
+        drills: typeof s.drills === 'string' ? JSON.parse(s.drills) : s.drills
+      })) || []);
+      setChatHistory(data.chatHistory || []);
+      setDataSynced(true);
+      console.log('✅ Data synced from database');
+    } catch (err) {
+      console.error('Sync error, falling back to localStorage:', err);
+      // Fallback to localStorage if DB fails
+      setPlayers(loadFromStorage(STORAGE_KEYS.PLAYERS, []));
+      setTeams(loadFromStorage(STORAGE_KEYS.TEAMS, []));
+      setSessions(loadFromStorage(STORAGE_KEYS.SESSIONS, []));
+      setChatHistory(loadFromStorage(STORAGE_KEYS.CHAT_HISTORY, []));
+    }
+    setDataLoading(false);
+  };
+
+  // Save to localStorage as backup
   useEffect(() => { saveToStorage(STORAGE_KEYS.PLAYERS, players); }, [players]);
   useEffect(() => { saveToStorage(STORAGE_KEYS.TEAMS, teams); }, [teams]);
   useEffect(() => { saveToStorage(STORAGE_KEYS.VIDEOS, videos); }, [videos]);
@@ -691,42 +751,83 @@ export default function PitchMindApp() {
     return [];
   };
 
-  const importTeamsnapPlayers = (teamsnapPlayers, selectedIds, teamInfo) => {
+  const importTeamsnapPlayers = async (teamsnapPlayers, selectedIds, teamInfo) => {
     const toImport = teamsnapPlayers.filter(p => selectedIds.includes(p.id));
-    const newPlayers = toImport.map(p => ({
-      id: Date.now() + Math.random(),
+    
+    // First create team in DB if needed
+    let dbTeamId = null;
+    if (teamInfo && user?.id) {
+      try {
+        const existingTeam = teams.find(t => t.teamsnap_id === teamInfo.id || t.teamsnapId === teamInfo.id);
+        if (!existingTeam) {
+          const newTeam = await apiCall('/api/teams', user.id, {
+            method: 'POST',
+            body: JSON.stringify({
+              name: teamInfo.name,
+              divisionName: teamInfo.divisionName,
+              seasonName: teamInfo.seasonName,
+              teamsnapId: teamInfo.id,
+              source: 'teamsnap'
+            })
+          });
+          dbTeamId = newTeam.id;
+          setTeams([...teams, newTeam]);
+        } else {
+          dbTeamId = existingTeam.id;
+        }
+      } catch (err) {
+        console.error('Failed to create team in DB:', err);
+      }
+    }
+    
+    // Format players for DB
+    const playersToCreate = toImport.map(p => ({
       name: p.name,
       position: mapTeamsnapPosition(p.position),
       age: p.birthday ? calculateTeamsnapAge(p.birthday) : 0,
       jerseyNumber: p.jerseyNumber,
       jerseyColor: '#10b981',
-      rating: 70,
-      trend: 'same',
-      avatar: p.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2),
-      createdAt: new Date().toISOString(),
-      analyses: [],
-      importedFrom: 'teamsnap',
       teamsnapId: p.id,
-      teamId: teamInfo?.id || null,
-      teamName: teamInfo?.name || 'Unassigned'
+      importedFrom: 'teamsnap',
+      teamId: dbTeamId
     }));
-    const existingIds = players.filter(p => p.teamsnapId).map(p => p.teamsnapId);
-    const uniquePlayers = newPlayers.filter(p => !existingIds.includes(p.teamsnapId));
-    setPlayers([...players, ...uniquePlayers]);
     
-    // Add team to teams list if not exists
-    if (teamInfo && !teams.find(t => t.id === teamInfo.id)) {
-      setTeams([...teams, {
-        id: teamInfo.id,
-        name: teamInfo.name,
-        divisionName: teamInfo.divisionName,
-        seasonName: teamInfo.seasonName,
-        importedAt: new Date().toISOString(),
-        source: 'teamsnap'
-      }]);
+    // Save to database
+    let newPlayers = [];
+    if (user?.id) {
+      try {
+        const result = await apiCall('/api/players/bulk', user.id, {
+          method: 'POST',
+          body: JSON.stringify({ players: playersToCreate, teamId: dbTeamId })
+        });
+        newPlayers = result.players || [];
+      } catch (err) {
+        console.error('Failed to save players to DB:', err);
+        // Fallback to local
+        newPlayers = playersToCreate.map(p => ({
+          ...p,
+          id: Date.now() + Math.random(),
+          rating: 70,
+          trend: 'same',
+          analyses: []
+        }));
+      }
     }
     
-    return uniquePlayers.length;
+    // Update local state
+    const formattedPlayers = newPlayers.map(p => ({
+      ...p,
+      teamId: p.team_id || dbTeamId,
+      teamName: teamInfo?.name || 'Unassigned',
+      jerseyNumber: p.jersey_number || p.jerseyNumber,
+      jerseyColor: p.jersey_color || p.jerseyColor,
+      teamsnapId: p.teamsnap_id || p.teamsnapId,
+      importedFrom: p.imported_from || 'teamsnap',
+      analyses: []
+    }));
+    
+    setPlayers([...players, ...formattedPlayers]);
+    return formattedPlayers.length;
   };
 
   const mapTeamsnapPosition = (pos) => {
@@ -824,23 +925,59 @@ export default function PitchMindApp() {
 
   const AddPlayerModal = () => {
     const [form, setForm] = useState(editingItem || { name: '', position: 'Midfielder', age: '', jerseyNumber: '', jerseyColor: '#10b981' });
-    const handleSubmit = (e) => {
+    const [saving, setSaving] = useState(false);
+    
+    const handleSubmit = async (e) => {
       e.preventDefault();
       if (!form.name || !form.age) return;
-      const newPlayer = { 
-        id: editingItem?.id || Date.now(), 
-        ...form, 
-        age: parseInt(form.age), 
+      setSaving(true);
+      
+      const playerData = {
+        name: form.name,
+        position: form.position,
+        age: parseInt(form.age),
         jerseyNumber: form.jerseyNumber ? parseInt(form.jerseyNumber) : null,
-        rating: editingItem?.rating || Math.floor(Math.random() * 20) + 60, 
-        trend: 'same', 
-        avatar: form.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2), 
-        createdAt: editingItem?.createdAt || new Date().toISOString(),
-        analyses: editingItem?.analyses || []
+        jerseyColor: form.jerseyColor
       };
-      if (editingItem) { setPlayers(players.map(p => p.id === editingItem.id ? newPlayer : p)); } 
-      else { setPlayers([...players, newPlayer]); }
-      setShowModal(null); setEditingItem(null);
+      
+      try {
+        if (editingItem) {
+          // Update existing player
+          if (user?.id) {
+            await apiCall(`/api/players/${editingItem.id}`, user.id, {
+              method: 'PUT',
+              body: JSON.stringify(playerData)
+            });
+          }
+          setPlayers(players.map(p => p.id === editingItem.id ? { ...p, ...playerData } : p));
+        } else {
+          // Create new player
+          let newPlayer;
+          if (user?.id) {
+            newPlayer = await apiCall('/api/players', user.id, {
+              method: 'POST',
+              body: JSON.stringify(playerData)
+            });
+          } else {
+            newPlayer = { id: Date.now(), ...playerData, rating: 70, trend: 'same', analyses: [] };
+          }
+          setPlayers([...players, { ...newPlayer, jerseyNumber: newPlayer.jersey_number || newPlayer.jerseyNumber, jerseyColor: newPlayer.jersey_color || newPlayer.jerseyColor }]);
+        }
+        setShowModal(null);
+        setEditingItem(null);
+      } catch (err) {
+        console.error('Failed to save player:', err);
+        // Still update local state on error
+        const localPlayer = { id: editingItem?.id || Date.now(), ...playerData, rating: 70, trend: 'same', analyses: [] };
+        if (editingItem) {
+          setPlayers(players.map(p => p.id === editingItem.id ? localPlayer : p));
+        } else {
+          setPlayers([...players, localPlayer]);
+        }
+        setShowModal(null);
+        setEditingItem(null);
+      }
+      setSaving(false);
     };
     return (
       <Modal title={editingItem ? 'Edit Player' : 'Add New Player'} onClose={() => { setShowModal(null); setEditingItem(null); }} wide>
@@ -1131,13 +1268,16 @@ export default function PitchMindApp() {
     const togglePlayer = (id) => setSelectedPlayers(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
     const toggleAll = () => setSelectedPlayers(selectedPlayers.length === roster.length ? [] : roster.map(p => p.id));
     
-    const handleImport = () => {
+    const handleImport = async () => {
       setStep('importing');
-      setTimeout(() => {
-        const count = importTeamsnapPlayers(roster, selectedPlayers, selectedTeam);
+      try {
+        const count = await importTeamsnapPlayers(roster, selectedPlayers, selectedTeam);
         setImportedCount(count);
         setStep('done');
-      }, 1000);
+      } catch (err) {
+        console.error('Import failed:', err);
+        setStep('teams');
+      }
     };
     
     return (
@@ -1228,9 +1368,27 @@ export default function PitchMindApp() {
 
   // Enhanced Players Page with Jersey Info
   const PlayersPage = () => {
-    const deletePlayer = (id) => { if (window.confirm('Delete this player?')) { setPlayers(players.filter(p => p.id !== id)); } };
-    const deleteTeam = (teamId) => { 
+    const deletePlayer = async (id) => { 
+      if (window.confirm('Delete this player?')) { 
+        if (user?.id) {
+          try {
+            await apiCall(`/api/players/${id}`, user.id, { method: 'DELETE' });
+          } catch (err) {
+            console.error('Failed to delete from DB:', err);
+          }
+        }
+        setPlayers(players.filter(p => p.id !== id)); 
+      } 
+    };
+    const deleteTeam = async (teamId) => { 
       if (window.confirm('Delete this team and unassign all players from it?')) { 
+        if (user?.id) {
+          try {
+            await apiCall(`/api/teams/${teamId}`, user.id, { method: 'DELETE' });
+          } catch (err) {
+            console.error('Failed to delete team from DB:', err);
+          }
+        }
         setTeams(teams.filter(t => t.id !== teamId)); 
         setPlayers(players.map(p => p.teamId === teamId ? {...p, teamId: null, teamName: 'Unassigned'} : p));
         if (selectedTeamFilter === teamId) setSelectedTeamFilter('all');
