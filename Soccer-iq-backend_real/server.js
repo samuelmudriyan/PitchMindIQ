@@ -197,15 +197,20 @@ async function getOrCreateUser(clerkId, userData = {}) {
     
     if (result.rows.length === 0) {
       // Create new user
+      console.log('Creating new user for clerk_id:', clerkId);
       result = await client.query(
         `INSERT INTO users (clerk_id, email, first_name, last_name) 
          VALUES ($1, $2, $3, $4) 
          RETURNING *`,
         [clerkId, userData.email || '', userData.firstName || '', userData.lastName || '']
       );
+      console.log('User created with id:', result.rows[0]?.id);
     }
     
     return result.rows[0];
+  } catch (err) {
+    console.error('getOrCreateUser error:', err.message);
+    throw err;
   } finally {
     client.release();
   }
@@ -216,18 +221,24 @@ async function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    console.log('Auth failed: No authorization header');
     return res.status(401).json({ error: 'No authorization token provided' });
   }
   
   const clerkId = authHeader.split(' ')[1];
   
   try {
-    const user = await getOrCreateUser(clerkId, req.body.userData || {});
+    const userData = (req.body && req.body.userData) ? req.body.userData : {};
+    const user = await getOrCreateUser(clerkId, userData);
+    if (!user) {
+      console.error('Auth failed: No user returned');
+      return res.status(500).json({ error: 'Failed to get or create user' });
+    }
     req.user = user;
     next();
   } catch (err) {
-    console.error('Auth error:', err);
-    res.status(500).json({ error: 'Authentication failed' });
+    console.error('Auth middleware error:', err.message);
+    res.status(500).json({ error: 'Authentication failed', details: err.message });
   }
 }
 
