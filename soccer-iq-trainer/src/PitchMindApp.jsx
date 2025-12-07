@@ -4,19 +4,7 @@ import { Upload, CheckCircle, AlertCircle, Loader2, Clock, Brain, Video, Zap, Mo
 import logo from './assets/logo.png';
 import DrillDetailPage from './DrillDetailPage';
 import DrillsPage from './DrillsPage';
-import drillsData, { 
-  drillCategories, 
-  difficultyLevels, 
-  ageGroups,
-  getDrillsByCategory,
-  getDrillsByAgeGroup,
-  filterDrills,
-  searchDrills,
-  getRandomDrills,
-  generateTrainingSession,
-  getCategoryColor,
-  getDifficultyColor
-} from './drills/DrillData';
+import drillsData, { drillCategories, difficultyLevels, ageGroups } from './drills/DrillData';
 
 const API_BASE = 'https://pitchmind-backend-production-483d.up.railway.app';
 
