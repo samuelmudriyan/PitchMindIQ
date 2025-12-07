@@ -112,7 +112,8 @@ const DrillsPage = ({ onAddToSession, onBack }) => {
             border: isExpanded ? '1px solid rgba(16,185,129,0.3)' : '1px solid rgba(255,255,255,0.08)', 
             overflow: 'hidden',
             cursor: 'pointer',
-            transition: 'all 0.2s'
+            transition: 'all 0.2s',
+            marginBottom: 12
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', padding: 16, gap: 16 }}>
@@ -159,14 +160,16 @@ const DrillsPage = ({ onAddToSession, onBack }) => {
       );
     }
 
-    // Grid view card
+    // Grid view card - with breakInside avoid for masonry
     return (
       <div style={{ 
         background: isExpanded ? 'rgba(16,185,129,0.05)' : 'rgba(255,255,255,0.03)', 
         borderRadius: 14, 
         border: isExpanded ? '1px solid rgba(16,185,129,0.25)' : '1px solid rgba(255,255,255,0.08)', 
         overflow: 'hidden',
-        transition: 'all 0.2s'
+        transition: 'all 0.2s',
+        marginBottom: 16,
+        breakInside: 'avoid' // Prevents card from breaking across columns
       }}>
         <div
           onClick={() => setExpandedDrill(isExpanded ? null : drill.id)}
@@ -203,7 +206,6 @@ const DrillsPage = ({ onAddToSession, onBack }) => {
               }}>{a}</span>
             ))}
           </div>
-          {/* Expand indicator */}
           <div style={{ 
             marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -302,9 +304,7 @@ const DrillsPage = ({ onAddToSession, onBack }) => {
       </div>
 
       {/* Category Pills */}
-      <div style={{ 
-        display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap'
-      }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
         <button
           onClick={() => setSelectedCategory('all')}
           style={{
@@ -337,16 +337,33 @@ const DrillsPage = ({ onAddToSession, onBack }) => {
         })}
       </div>
 
-      {/* Drills Grid/List */}
+      {/* Drills - Masonry Grid or List */}
       {filteredDrills.length > 0 ? (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: viewMode === 'grid' ? 'repeat(auto-fill, minmax(320px, 1fr))' : '1fr',
-          gap: viewMode === 'grid' ? 18 : 12,
-          alignItems: 'start' // KEY: This makes cards expand independently!
-        }}>
-          {filteredDrills.map(drill => <DrillCard key={drill.id} drill={drill} />)}
-        </div>
+        viewMode === 'grid' ? (
+          // Masonry layout using CSS columns
+          <div style={{
+            columnCount: 3,
+            columnGap: 16,
+            // Responsive column counts
+          }}>
+            <style>{`
+              @media (max-width: 1200px) {
+                .masonry-grid { column-count: 2 !important; }
+              }
+              @media (max-width: 768px) {
+                .masonry-grid { column-count: 1 !important; }
+              }
+            `}</style>
+            <div className="masonry-grid" style={{ columnCount: 3, columnGap: 16 }}>
+              {filteredDrills.map(drill => <DrillCard key={drill.id} drill={drill} />)}
+            </div>
+          </div>
+        ) : (
+          // List view
+          <div>
+            {filteredDrills.map(drill => <DrillCard key={drill.id} drill={drill} />)}
+          </div>
+        )
       ) : (
         <div style={{ textAlign: 'center', padding: '60px 20px', color: 'rgba(255,255,255,0.4)' }}>
           <div style={{ fontSize: 56, marginBottom: 16 }}>🔍</div>
