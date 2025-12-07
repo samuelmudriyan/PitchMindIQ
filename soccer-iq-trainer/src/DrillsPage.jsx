@@ -275,11 +275,14 @@ const DrillVisualization = ({ drill }) => {
 };
 
 // Main DrillsPage Component
-const DrillsPage = ({ drills = [] }) => {
+const DrillsPage = () => {
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedCategories, setSelectedCategories] = React.useState([]);
   const [viewMode, setViewMode] = React.useState('grid');
   const [expandedDrills, setExpandedDrills] = React.useState({});
+  
+  // Use imported drills data
+  const drills = drillsData || [];
 
   const categoryColors = {
     'Passing & Receiving': '#3b82f6',
