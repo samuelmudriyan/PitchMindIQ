@@ -1,408 +1,803 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { SignInButton, SignUpButton } from '@clerk/clerk-react';
-import {
-  Play, Brain, Target, TrendingUp, Video, Zap, Users,
-  ChevronRight, Star, Check, ArrowRight, Menu, X,
-  Shield, Clock, BarChart3, Award, Sparkles
-} from 'lucide-react';
-import logo from './assets/logo.png';
+import React, { useState, useEffect } from 'react';
+import { SUBSCRIPTION_TIERS } from './PaymentGate';
 
-export default function LandingPage() {
-  const [isScrolled, setIsScrolled] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
-  const heroRef = useRef(null);
+// ============================================================================
+// PITCHMIND LANDING PAGE
+// Target: Passionate but inexperienced coaches
+// Key offer: Annual subscription = FREE tripod
+// ============================================================================
+
+const LandingPage = ({ onGetStarted, onLogin }) => {
+  const [billingCycle, setBillingCycle] = useState('annual');
+  const [isLaunchPricing] = useState(true); // Toggle for launch pricing
+  const [scrollY, setScrollY] = useState(0);
 
   useEffect(() => {
-    const handleScroll = () => setIsScrolled(window.scrollY > 20);
+    const handleScroll = () => setScrollY(window.scrollY);
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  useEffect(() => {
-    const handleMouseMove = (e) => {
-      setMousePosition({
-        x: (e.clientX - window.innerWidth / 2) / 50,
-        y: (e.clientY - window.innerHeight / 2) / 50
-      });
-    };
-    window.addEventListener('mousemove', handleMouseMove);
-    return () => window.removeEventListener('mousemove', handleMouseMove);
-  }, []);
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add('animate-in');
-          }
-        });
-      },
-      { threshold: 0.1, rootMargin: '0px 0px -50px 0px' }
-    );
-    document.querySelectorAll('.scroll-animate').forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, []);
-
-  const Logo = ({ size = 'md' }) => {
-    const sizes = { sm: 'w-8 h-8', md: 'w-10 h-10', lg: 'w-14 h-14' };
-    return <img src={logo} alt="PitchMind" className={`${sizes[size]} object-contain`} />;
+  // Colors
+  const c = {
+    bg: '#0a0e17',
+    bgAlt: '#0f172a',
+    card: '#1e293b',
+    border: '#334155',
+    text: '#f1f5f9',
+    textMuted: '#94a3b8',
+    accent: '#f59e0b',
+    accentHover: '#fbbf24',
+    success: '#22c55e',
+    field: '#166534',
   };
 
-  const AnimatedCounter = ({ end, duration = 2000, suffix = '' }) => {
-    const [count, setCount] = useState(0);
-    const [isVisible, setIsVisible] = useState(false);
-    const ref = useRef(null);
-
-    useEffect(() => {
-      const observer = new IntersectionObserver(([entry]) => {
-        if (entry.isIntersecting && !isVisible) setIsVisible(true);
-      }, { threshold: 0.5 });
-      if (ref.current) observer.observe(ref.current);
-      return () => observer.disconnect();
-    }, [isVisible]);
-
-    useEffect(() => {
-      if (!isVisible) return;
-      let startTime;
-      const animate = (timestamp) => {
-        if (!startTime) startTime = timestamp;
-        const progress = Math.min((timestamp - startTime) / duration, 1);
-        setCount(Math.floor(progress * end));
-        if (progress < 1) requestAnimationFrame(animate);
-      };
-      requestAnimationFrame(animate);
-    }, [isVisible, end, duration]);
-
-    return <span ref={ref}>{count}{suffix}</span>;
-  };
+  const tiers = ['base', 'pro', 'elite', 'coach'].map(id => SUBSCRIPTION_TIERS[id]);
 
   return (
-    <div className="min-h-screen bg-[#0a0f0d] text-white overflow-x-hidden">
+    <div style={{ 
+      minHeight: '100vh', 
+      background: c.bg, 
+      color: c.text,
+      fontFamily: "'Outfit', 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif",
+      overflowX: 'hidden',
+    }}>
+      {/* Google Fonts */}
       <style>{`
-        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-20px); } }
-        @keyframes gradient-shift { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
-        @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 20px rgba(16, 185, 129, 0.3); } 50% { box-shadow: 0 0 40px rgba(16, 185, 129, 0.6); } }
-        @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
-        @keyframes particle { 0%, 100% { transform: translateY(0) translateX(0); opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 50% { transform: translateY(-100px) translateX(50px); } }
-        .scroll-animate { opacity: 0; transform: translateY(40px); transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
-        .scroll-animate.animate-in { opacity: 1; transform: translateY(0); }
-        .gradient-text { background: linear-gradient(90deg, #10b981, #34d399, #fbbf24, #10b981); background-size: 200% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: gradient-shift 4s ease infinite; }
-        .card-hover { transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
-        .card-hover:hover { transform: translateY(-8px); box-shadow: 0 20px 40px rgba(16, 185, 129, 0.15); }
-        .btn-glow { animation: pulse-glow 2s ease-in-out infinite; }
-        .animate-marquee { animation: marquee 25s linear infinite; }
-        .stagger-1 { transition-delay: 0.1s; } .stagger-2 { transition-delay: 0.2s; } .stagger-3 { transition-delay: 0.3s; }
-        .stagger-4 { transition-delay: 0.4s; } .stagger-5 { transition-delay: 0.5s; } .stagger-6 { transition-delay: 0.6s; }
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=DM+Sans:wght@400;500;700&display=swap');
+        
+        @keyframes float {
+          0%, 100% { transform: translateY(0px) rotate(0deg); }
+          50% { transform: translateY(-20px) rotate(2deg); }
+        }
+        @keyframes pulse-glow {
+          0%, 100% { box-shadow: 0 0 20px rgba(245, 158, 11, 0.3); }
+          50% { box-shadow: 0 0 40px rgba(245, 158, 11, 0.6); }
+        }
+        @keyframes slide-up {
+          from { opacity: 0; transform: translateY(30px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .slide-up { animation: slide-up 0.6s ease-out forwards; }
+        .delay-1 { animation-delay: 0.1s; opacity: 0; }
+        .delay-2 { animation-delay: 0.2s; opacity: 0; }
+        .delay-3 { animation-delay: 0.3s; opacity: 0; }
+        .delay-4 { animation-delay: 0.4s; opacity: 0; }
       `}</style>
 
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-emerald-500/10 rounded-full blur-[120px]" style={{ transform: `translate(${mousePosition.x * 2}px, ${mousePosition.y * 2}px)` }} />
-        <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-amber-500/10 rounded-full blur-[100px]" style={{ transform: `translate(${-mousePosition.x}px, ${-mousePosition.y}px)` }} />
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:60px_60px]" />
-        {[...Array(15)].map((_, i) => (
-          <div key={i} className="absolute w-1 h-1 bg-emerald-400/40 rounded-full" style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%`, animation: `particle ${8 + Math.random() * 10}s ease-in-out infinite`, animationDelay: `${Math.random() * 5}s` }} />
-        ))}
-      </div>
+      {/* Navigation */}
+      <nav style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 100,
+        padding: '16px 32px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        background: scrollY > 50 ? 'rgba(10, 14, 23, 0.95)' : 'transparent',
+        backdropFilter: scrollY > 50 ? 'blur(20px)' : 'none',
+        borderBottom: scrollY > 50 ? `1px solid ${c.border}` : 'none',
+        transition: 'all 0.3s ease',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ fontSize: '32px' }}>⚽</span>
+          <span style={{ 
+            fontSize: '24px', 
+            fontWeight: '800',
+            background: `linear-gradient(135deg, ${c.accent}, ${c.accentHover})`,
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+          }}>
+            PitchMind
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <button onClick={onLogin} style={{
+            padding: '10px 20px',
+            background: 'transparent',
+            border: 'none',
+            color: c.textMuted,
+            fontSize: '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+          }}>
+            Sign In
+          </button>
+          <button onClick={onGetStarted} style={{
+            padding: '10px 24px',
+            background: `linear-gradient(135deg, ${c.accent}, ${c.accentHover})`,
+            border: 'none',
+            borderRadius: '8px',
+            color: '#000',
+            fontSize: '14px',
+            fontWeight: '600',
+            cursor: 'pointer',
+          }}>
+            Get Started Free
+          </button>
+        </div>
+      </nav>
 
-      <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${isScrolled ? 'bg-[#0a0f0d]/90 backdrop-blur-xl border-b border-white/10 py-3' : 'py-4'}`}>
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3 group cursor-pointer">
-              <div className="transition-transform duration-300 group-hover:scale-110"><Logo size="md" /></div>
-              <span className="text-2xl font-bold bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 bg-clip-text text-transparent">PitchMind</span>
+      {/* Hero Section */}
+      <section style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '120px 32px 80px',
+        position: 'relative',
+        overflow: 'hidden',
+      }}>
+        {/* Background Elements */}
+        <div style={{
+          position: 'absolute',
+          top: '20%',
+          left: '10%',
+          width: '400px',
+          height: '400px',
+          background: `radial-gradient(circle, ${c.accent}15 0%, transparent 70%)`,
+          borderRadius: '50%',
+          filter: 'blur(60px)',
+          animation: 'float 8s ease-in-out infinite',
+        }} />
+        <div style={{
+          position: 'absolute',
+          bottom: '10%',
+          right: '15%',
+          width: '300px',
+          height: '300px',
+          background: `radial-gradient(circle, ${c.success}10 0%, transparent 70%)`,
+          borderRadius: '50%',
+          filter: 'blur(40px)',
+          animation: 'float 10s ease-in-out infinite reverse',
+        }} />
+
+        <div style={{ maxWidth: '1200px', textAlign: 'center', position: 'relative', zIndex: 1 }}>
+          {/* Launch Badge */}
+          {isLaunchPricing && (
+            <div className="slide-up" style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '8px 16px',
+              background: `${c.accent}22`,
+              border: `1px solid ${c.accent}44`,
+              borderRadius: '50px',
+              marginBottom: '24px',
+            }}>
+              <span style={{ fontSize: '14px' }}>🚀</span>
+              <span style={{ fontSize: '14px', color: c.accent, fontWeight: '600' }}>
+                Launch Pricing — 50% Off (Limited Time)
+              </span>
             </div>
-            <div className="hidden md:flex items-center space-x-8">
-              {['Features', 'How It Works', 'About', 'Pricing'].map((item) => (
-                <a key={item} href={`#${item.toLowerCase().replace(' ', '-')}`} className="relative text-gray-300 hover:text-white transition-colors group">
-                  {item}<span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-emerald-400 transition-all duration-300 group-hover:w-full" />
+          )}
+
+          {/* Main Headline */}
+          <h1 className="slide-up delay-1" style={{
+            fontSize: 'clamp(40px, 7vw, 72px)',
+            fontWeight: '900',
+            lineHeight: '1.1',
+            margin: '0 0 24px 0',
+            letterSpacing: '-0.02em',
+          }}>
+            Coach Like a Pro.
+            <br />
+            <span style={{
+              background: `linear-gradient(135deg, ${c.accent}, ${c.accentHover}, ${c.success})`,
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+            }}>
+              No Experience Required.
+            </span>
+          </h1>
+
+          {/* Subheadline */}
+          <p className="slide-up delay-2" style={{
+            fontSize: 'clamp(18px, 2.5vw, 24px)',
+            color: c.textMuted,
+            maxWidth: '700px',
+            margin: '0 auto 40px',
+            lineHeight: '1.6',
+          }}>
+            AI-powered video analysis that shows you exactly what to coach.
+            <br />
+            Upload game footage. Get tactical insights in minutes.
+          </p>
+
+          {/* CTA Buttons */}
+          <div className="slide-up delay-3" style={{ display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button onClick={onGetStarted} style={{
+              padding: '18px 40px',
+              background: `linear-gradient(135deg, ${c.accent}, ${c.accentHover})`,
+              border: 'none',
+              borderRadius: '12px',
+              color: '#000',
+              fontSize: '18px',
+              fontWeight: '700',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              animation: 'pulse-glow 2s ease-in-out infinite',
+            }}>
+              Start Free Trial
+              <span style={{ fontSize: '20px' }}>→</span>
+            </button>
+            <button style={{
+              padding: '18px 40px',
+              background: 'transparent',
+              border: `2px solid ${c.border}`,
+              borderRadius: '12px',
+              color: c.text,
+              fontSize: '18px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+            }}>
+              <span style={{ fontSize: '20px' }}>▶</span>
+              Watch Demo
+            </button>
+          </div>
+
+          {/* Trust Indicators */}
+          <div className="slide-up delay-4" style={{
+            display: 'flex',
+            justifyContent: 'center',
+            gap: '40px',
+            marginTop: '60px',
+            flexWrap: 'wrap',
+          }}>
+            {[
+              { value: '500+', label: 'Coaches' },
+              { value: '10K+', label: 'Videos Analyzed' },
+              { value: '4.9★', label: 'Rating' },
+            ].map((stat, i) => (
+              <div key={i} style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '28px', fontWeight: '800', color: c.accent }}>{stat.value}</div>
+                <div style={{ fontSize: '14px', color: c.textMuted }}>{stat.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Problem/Solution Section */}
+      <section style={{
+        padding: '100px 32px',
+        background: c.bgAlt,
+      }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: '60px' }}>
+            <h2 style={{ fontSize: '42px', fontWeight: '800', margin: '0 0 16px 0' }}>
+              You Know Soccer. Now <span style={{ color: c.accent }}>See It.</span>
+            </h2>
+            <p style={{ fontSize: '18px', color: c.textMuted, maxWidth: '600px', margin: '0 auto' }}>
+              You've watched a thousand games. But do you see what De Bruyne sees? PitchMind shows you.
+            </p>
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))',
+            gap: '32px',
+          }}>
+            {/* Before Card */}
+            <div style={{
+              padding: '40px',
+              background: '#1a1a2e',
+              borderRadius: '20px',
+              border: `1px solid #ef444433`,
+            }}>
+              <div style={{ fontSize: '48px', marginBottom: '20px' }}>😓</div>
+              <h3 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 16px 0', color: '#ef4444' }}>
+                Without PitchMind
+              </h3>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {[
+                  'Spend hours rewatching game footage',
+                  '"I know something\'s wrong but can\'t explain it"',
+                  'Kids repeat the same mistakes every game',
+                  'Parents ask why Johnny isn\'t improving',
+                  'Feel like a volunteer, not a coach',
+                ].map((item, i) => (
+                  <li key={i} style={{
+                    padding: '12px 0',
+                    borderBottom: i < 4 ? `1px solid ${c.border}` : 'none',
+                    color: c.textMuted,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                  }}>
+                    <span style={{ color: '#ef4444' }}>✗</span>
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* After Card */}
+            <div style={{
+              padding: '40px',
+              background: `linear-gradient(135deg, ${c.field}22 0%, ${c.success}11 100%)`,
+              borderRadius: '20px',
+              border: `1px solid ${c.success}33`,
+            }}>
+              <div style={{ fontSize: '48px', marginBottom: '20px' }}>🏆</div>
+              <h3 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 16px 0', color: c.success }}>
+                With PitchMind
+              </h3>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {[
+                  'AI analyzes footage in minutes, not hours',
+                  '"Sarah, you had 3 passing options here"',
+                  'Players learn WHY, not just what',
+                  'Show parents real improvement data',
+                  'Coach with confidence and credibility',
+                ].map((item, i) => (
+                  <li key={i} style={{
+                    padding: '12px 0',
+                    borderBottom: i < 4 ? `1px solid ${c.border}` : 'none',
+                    color: c.text,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                  }}>
+                    <span style={{ color: c.success }}>✓</span>
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* How It Works */}
+      <section style={{ padding: '100px 32px', background: c.bg }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: '60px' }}>
+            <h2 style={{ fontSize: '42px', fontWeight: '800', margin: '0 0 16px 0' }}>
+              Three Steps to <span style={{ color: c.accent }}>Better Coaching</span>
+            </h2>
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+            gap: '40px',
+          }}>
+            {[
+              { step: '1', icon: '📱', title: 'Record the Game', desc: 'Set up your phone on a tripod at midfield. Press record. That\'s it.' },
+              { step: '2', icon: '🤖', title: 'AI Does the Work', desc: 'Upload the video. Our AI tracks every player, every pass, every decision.' },
+              { step: '3', icon: '📊', title: 'Coach with Clarity', desc: 'Get specific insights: "At 23:15, Marcus had 3 options. He chose the worst one."' },
+            ].map((item, i) => (
+              <div key={i} style={{
+                padding: '40px',
+                background: c.card,
+                borderRadius: '20px',
+                border: `1px solid ${c.border}`,
+                textAlign: 'center',
+                position: 'relative',
+              }}>
+                <div style={{
+                  position: 'absolute',
+                  top: '-20px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  width: '40px',
+                  height: '40px',
+                  background: `linear-gradient(135deg, ${c.accent}, ${c.accentHover})`,
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: '800',
+                  color: '#000',
+                }}>
+                  {item.step}
+                </div>
+                <div style={{ fontSize: '56px', marginBottom: '20px', marginTop: '10px' }}>{item.icon}</div>
+                <h3 style={{ fontSize: '22px', fontWeight: '700', margin: '0 0 12px 0' }}>{item.title}</h3>
+                <p style={{ fontSize: '16px', color: c.textMuted, margin: 0, lineHeight: '1.6' }}>{item.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Tripod Offer Section */}
+      <section style={{
+        padding: '100px 32px',
+        background: `linear-gradient(135deg, ${c.accent}15 0%, ${c.bgAlt} 50%, ${c.success}10 100%)`,
+      }}>
+        <div style={{ maxWidth: '1000px', margin: '0 auto', textAlign: 'center' }}>
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '8px 16px',
+            background: `${c.success}22`,
+            border: `1px solid ${c.success}44`,
+            borderRadius: '50px',
+            marginBottom: '24px',
+          }}>
+            <span style={{ fontSize: '14px' }}>🎁</span>
+            <span style={{ fontSize: '14px', color: c.success, fontWeight: '600' }}>
+              Annual Subscribers Only
+            </span>
+          </div>
+
+          <h2 style={{ fontSize: '48px', fontWeight: '800', margin: '0 0 20px 0' }}>
+            We'll Send You a <span style={{ color: c.accent }}>Free Tripod</span>
+          </h2>
+          <p style={{ fontSize: '20px', color: c.textMuted, maxWidth: '700px', margin: '0 auto 40px', lineHeight: '1.6' }}>
+            The #1 problem with game footage? Shaky, low-angle video that's impossible to analyze.
+            <br /><strong style={{ color: c.text }}>We solve that by shipping you the right equipment.</strong>
+          </p>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '24px',
+            marginBottom: '40px',
+          }}>
+            {[
+              { tier: 'Pro Annual', tripod: 'Basic Tripod Kit', value: '$30', icon: '📷' },
+              { tier: 'Elite Annual', tripod: '10ft Tripod + Mount', value: '$100', icon: '📹' },
+              { tier: 'Coach Annual', tripod: '13ft Pro Tripod + Case', value: '$180', icon: '🎬' },
+            ].map((item, i) => (
+              <div key={i} style={{
+                padding: '24px',
+                background: c.card,
+                borderRadius: '16px',
+                border: `1px solid ${c.border}`,
+              }}>
+                <div style={{ fontSize: '40px', marginBottom: '12px' }}>{item.icon}</div>
+                <div style={{ fontSize: '14px', color: c.textMuted, marginBottom: '4px' }}>{item.tier}</div>
+                <div style={{ fontSize: '18px', fontWeight: '700', marginBottom: '4px' }}>{item.tripod}</div>
+                <div style={{ fontSize: '14px', color: c.success }}>FREE (${item.value} value)</div>
+              </div>
+            ))}
+          </div>
+
+          <p style={{ fontSize: '14px', color: c.textMuted }}>
+            Tripod ships within 5-7 business days of subscription confirmation.
+          </p>
+        </div>
+      </section>
+
+      {/* Pricing Section */}
+      <section id="pricing" style={{ padding: '100px 32px', background: c.bg }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: '40px' }}>
+            <h2 style={{ fontSize: '42px', fontWeight: '800', margin: '0 0 16px 0' }}>
+              Simple, <span style={{ color: c.accent }}>Affordable</span> Pricing
+            </h2>
+            <p style={{ fontSize: '18px', color: c.textMuted, marginBottom: '24px' }}>
+              Start free. Upgrade when you're ready.
+            </p>
+
+            {/* Billing Toggle */}
+            <div style={{
+              display: 'inline-flex',
+              background: c.card,
+              borderRadius: '12px',
+              padding: '4px',
+              border: `1px solid ${c.border}`,
+            }}>
+              {['monthly', 'annual'].map(cycle => (
+                <button
+                  key={cycle}
+                  onClick={() => setBillingCycle(cycle)}
+                  style={{
+                    padding: '10px 24px',
+                    background: billingCycle === cycle ? c.accent : 'transparent',
+                    border: 'none',
+                    borderRadius: '8px',
+                    color: billingCycle === cycle ? '#000' : c.textMuted,
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  {cycle === 'monthly' ? 'Monthly' : 'Annual'}
+                  {cycle === 'annual' && <span style={{
+                    padding: '2px 8px',
+                    background: billingCycle === 'annual' ? '#000' : c.success,
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    color: billingCycle === 'annual' ? c.accent : '#fff',
+                  }}>
+                    + FREE Tripod
+                  </span>}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Pricing Cards */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+            gap: '24px',
+          }}>
+            {tiers.map(tier => {
+              const price = billingCycle === 'annual'
+                ? (isLaunchPricing ? tier.launchAnnualPrice : tier.annualPrice)
+                : (isLaunchPricing ? tier.launchPrice : tier.price);
+              const originalPrice = billingCycle === 'annual' ? tier.annualPrice : tier.price;
+              const isPopular = tier.popular;
+
+              return (
+                <div key={tier.id} style={{
+                  padding: '32px',
+                  background: isPopular ? `linear-gradient(135deg, ${c.card} 0%, ${c.accent}11 100%)` : c.card,
+                  borderRadius: '20px',
+                  border: isPopular ? `2px solid ${c.accent}` : `1px solid ${c.border}`,
+                  position: 'relative',
+                  transform: isPopular ? 'scale(1.02)' : 'scale(1)',
+                }}>
+                  {isPopular && (
+                    <div style={{
+                      position: 'absolute',
+                      top: '-12px',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      padding: '6px 16px',
+                      background: c.accent,
+                      borderRadius: '20px',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      color: '#000',
+                    }}>
+                      ⭐ MOST POPULAR
+                    </div>
+                  )}
+
+                  <h3 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 4px 0' }}>{tier.name}</h3>
+                  <p style={{ fontSize: '14px', color: c.textMuted, margin: '0 0 20px 0' }}>{tier.tagline}</p>
+
+                  <div style={{ marginBottom: '20px' }}>
+                    {isLaunchPricing && (
+                      <span style={{
+                        fontSize: '18px',
+                        color: c.textMuted,
+                        textDecoration: 'line-through',
+                        marginRight: '8px',
+                      }}>
+                        ${originalPrice}
+                      </span>
+                    )}
+                    <span style={{ fontSize: '48px', fontWeight: '800', color: c.accent }}>${price}</span>
+                    <span style={{ fontSize: '16px', color: c.textMuted }}>
+                      /{billingCycle === 'annual' ? 'year' : 'mo'}
+                    </span>
+                  </div>
+
+                  {/* Tripod Badge */}
+                  {billingCycle === 'annual' && tier.tripod?.annual && tier.tripod.annual !== 'discount' && (
+                    <div style={{
+                      padding: '10px 12px',
+                      background: `${c.success}22`,
+                      borderRadius: '8px',
+                      marginBottom: '20px',
+                      border: `1px solid ${c.success}33`,
+                    }}>
+                      <span style={{ fontSize: '14px', color: c.success, fontWeight: '600' }}>
+                        🎁 {tier.tripod.description}
+                      </span>
+                    </div>
+                  )}
+
+                  <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 24px 0' }}>
+                    {tier.features.map((f, i) => (
+                      <li key={i} style={{
+                        padding: '8px 0',
+                        fontSize: '14px',
+                        color: c.text,
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '10px',
+                      }}>
+                        <span style={{ color: c.success, flexShrink: 0 }}>✓</span>
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+
+                  <button onClick={onGetStarted} style={{
+                    width: '100%',
+                    padding: '14px',
+                    background: isPopular ? `linear-gradient(135deg, ${c.accent}, ${c.accentHover})` : 'transparent',
+                    border: isPopular ? 'none' : `1px solid ${c.border}`,
+                    borderRadius: '10px',
+                    color: isPopular ? '#000' : c.text,
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                  }}>
+                    {isPopular ? 'Get Started' : 'Choose Plan'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          <p style={{ textAlign: 'center', marginTop: '32px', fontSize: '14px', color: c.textMuted }}>
+            All plans include a 7-day money-back guarantee. Cancel anytime.
+          </p>
+        </div>
+      </section>
+
+      {/* Competitor Comparison */}
+      <section style={{ padding: '100px 32px', background: c.bgAlt }}>
+        <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: '40px' }}>
+            <h2 style={{ fontSize: '36px', fontWeight: '800', margin: '0 0 16px 0' }}>
+              Why Coaches Choose <span style={{ color: c.accent }}>PitchMind</span>
+            </h2>
+          </div>
+
+          <div style={{
+            background: c.card,
+            borderRadius: '16px',
+            overflow: 'hidden',
+            border: `1px solid ${c.border}`,
+          }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: c.bgAlt }}>
+                  <th style={{ padding: '16px 20px', textAlign: 'left', fontWeight: '600', color: c.textMuted }}>Feature</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'center', fontWeight: '700', color: c.accent }}>PitchMind</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'center', fontWeight: '600', color: c.textMuted }}>Hudl</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'center', fontWeight: '600', color: c.textMuted }}>Veo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { feature: 'Starting Price', pitchmind: '$10/mo', hudl: '$150/mo', veo: '$2,000 + $100/mo' },
+                  { feature: 'AI Tactical Analysis', pitchmind: '✓', hudl: '✗', veo: 'Basic' },
+                  { feature: 'Decision Training Quiz', pitchmind: '✓', hudl: '✗', veo: '✗' },
+                  { feature: 'Compare to Pro Players', pitchmind: '✓', hudl: '✗', veo: '✗' },
+                  { feature: 'Hardware Required', pitchmind: 'Your Phone', hudl: 'Your Phone', veo: '$2,000 Camera' },
+                  { feature: 'Free Tripod', pitchmind: '✓ (Annual)', hudl: '✗', veo: '✗' },
+                  { feature: 'Setup Time', pitchmind: '5 min', hudl: '30 min', veo: '30 min' },
+                ].map((row, i) => (
+                  <tr key={i} style={{ borderTop: `1px solid ${c.border}` }}>
+                    <td style={{ padding: '14px 20px', fontWeight: '500' }}>{row.feature}</td>
+                    <td style={{ padding: '14px 20px', textAlign: 'center', color: row.pitchmind.includes('✓') ? c.success : c.accent, fontWeight: '600' }}>{row.pitchmind}</td>
+                    <td style={{ padding: '14px 20px', textAlign: 'center', color: row.hudl === '✗' ? '#ef4444' : c.textMuted }}>{row.hudl}</td>
+                    <td style={{ padding: '14px 20px', textAlign: 'center', color: row.veo === '✗' ? '#ef4444' : c.textMuted }}>{row.veo}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      {/* Testimonials */}
+      <section style={{ padding: '100px 32px', background: c.bg }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: '60px' }}>
+            <h2 style={{ fontSize: '42px', fontWeight: '800', margin: 0 }}>
+              Coaches <span style={{ color: c.accent }}>Love</span> PitchMind
+            </h2>
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))',
+            gap: '24px',
+          }}>
+            {[
+              { quote: "I've been coaching rec league for 5 years. PitchMind made me feel like I finally know what I'm doing.", name: 'Mike R.', role: 'U12 Coach, Ohio', avatar: '👨‍🦰' },
+              { quote: "My son's travel team improved so much after I started using this. The decision quiz is genius.", name: 'Jennifer T.', role: 'U10 Parent & Assistant Coach', avatar: '👩' },
+              { quote: "Worth every penny. I used to spend Sunday nights watching game tape. Now AI does it in 10 minutes.", name: 'David K.', role: 'Club Coach, Texas', avatar: '👨' },
+            ].map((t, i) => (
+              <div key={i} style={{
+                padding: '32px',
+                background: c.card,
+                borderRadius: '16px',
+                border: `1px solid ${c.border}`,
+              }}>
+                <div style={{ display: 'flex', marginBottom: '16px' }}>
+                  {[1,2,3,4,5].map(s => <span key={s} style={{ color: c.accent, fontSize: '20px' }}>★</span>)}
+                </div>
+                <p style={{ fontSize: '16px', color: c.text, lineHeight: '1.7', margin: '0 0 24px 0', fontStyle: 'italic' }}>
+                  "{t.quote}"
+                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ fontSize: '36px' }}>{t.avatar}</div>
+                  <div>
+                    <div style={{ fontWeight: '600' }}>{t.name}</div>
+                    <div style={{ fontSize: '14px', color: c.textMuted }}>{t.role}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Final CTA */}
+      <section style={{
+        padding: '100px 32px',
+        background: `linear-gradient(135deg, ${c.accent}22 0%, ${c.bg} 50%, ${c.success}11 100%)`,
+        textAlign: 'center',
+      }}>
+        <div style={{ maxWidth: '700px', margin: '0 auto' }}>
+          <h2 style={{ fontSize: '48px', fontWeight: '800', margin: '0 0 20px 0' }}>
+            Ready to Coach<br /><span style={{ color: c.accent }}>Like You Mean It?</span>
+          </h2>
+          <p style={{ fontSize: '20px', color: c.textMuted, marginBottom: '40px' }}>
+            Start with a free trial. No credit card required.
+          </p>
+          <button onClick={onGetStarted} style={{
+            padding: '20px 48px',
+            background: `linear-gradient(135deg, ${c.accent}, ${c.accentHover})`,
+            border: 'none',
+            borderRadius: '14px',
+            color: '#000',
+            fontSize: '20px',
+            fontWeight: '700',
+            cursor: 'pointer',
+            animation: 'pulse-glow 2s ease-in-out infinite',
+          }}>
+            Get Started Free →
+          </button>
+          <p style={{ fontSize: '14px', color: c.textMuted, marginTop: '20px' }}>
+            Join 500+ coaches already improving their game
+          </p>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer style={{
+        padding: '60px 32px 40px',
+        background: c.bgAlt,
+        borderTop: `1px solid ${c.border}`,
+      }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '24px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '28px' }}>⚽</span>
+              <span style={{ fontSize: '20px', fontWeight: '700', color: c.accent }}>PitchMind</span>
+            </div>
+            <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap' }}>
+              {['Privacy', 'Terms', 'Support', 'Contact'].map(link => (
+                <a key={link} href="#" style={{ color: c.textMuted, textDecoration: 'none', fontSize: '14px' }}>
+                  {link}
                 </a>
               ))}
             </div>
-            <div className="hidden md:flex items-center space-x-4">
-              <SignInButton mode="modal"><button className="px-5 py-2.5 text-gray-300 hover:text-white transition-all font-medium hover:bg-white/5 rounded-full">Sign In</button></SignInButton>
-              <SignUpButton mode="modal"><button className="px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white rounded-full font-semibold transition-all shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:scale-105">Get Started Free</button></SignUpButton>
-            </div>
-            <button className="md:hidden p-2 text-gray-300" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
-              {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-            </button>
           </div>
-        </div>
-        {mobileMenuOpen && (
-          <div className="md:hidden bg-[#0a0f0d]/95 backdrop-blur-xl border-t border-white/10 px-6 py-4 space-y-4">
-            {['Features', 'How It Works', 'About', 'Pricing'].map((item) => (<a key={item} href={`#${item.toLowerCase().replace(' ', '-')}`} className="block text-gray-300 hover:text-white py-2">{item}</a>))}
-            <div className="pt-4 space-y-3">
-              <SignInButton mode="modal"><button className="w-full py-3 border border-white/20 rounded-lg text-white font-medium">Sign In</button></SignInButton>
-              <SignUpButton mode="modal"><button className="w-full py-3 bg-emerald-500 rounded-lg text-white font-semibold">Get Started Free</button></SignUpButton>
-            </div>
-          </div>
-        )}
-      </nav>
-
-      <section ref={heroRef} className="relative pt-32 pb-20 px-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="grid lg:grid-cols-2 gap-12 items-center">
-            <div className="space-y-8">
-              <div className="inline-flex items-center space-x-2 bg-white/5 border border-white/10 rounded-full px-4 py-2">
-                <Sparkles className="w-4 h-4 text-emerald-400 animate-pulse" />
-                <span className="text-sm text-gray-300">AI-Powered Soccer Analysis</span>
-                <span className="bg-emerald-500/20 text-emerald-400 text-xs px-2 py-0.5 rounded-full font-medium">New</span>
-              </div>
-              <h1 className="text-5xl lg:text-7xl font-bold leading-tight">
-                Train Your<span className="block gradient-text">Soccer IQ</span>Like The Pros
-              </h1>
-              <p className="text-xl text-gray-400 leading-relaxed max-w-lg">
-                Upload your game footage and let AI analyze every decision. Compare your choices to elite players and unlock your tactical potential.
-              </p>
-              <div className="flex flex-col sm:flex-row gap-4">
-                <SignUpButton mode="modal">
-                  <button className="group px-8 py-4 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white rounded-full font-semibold text-lg transition-all shadow-xl shadow-emerald-500/30 hover:shadow-emerald-500/50 flex items-center justify-center space-x-2 btn-glow hover:scale-105">
-                    <span>Start Analyzing Free</span><ArrowRight className="w-5 h-5 group-hover:translate-x-2 transition-transform" />
-                  </button>
-                </SignUpButton>
-                <button className="group px-8 py-4 border border-white/20 hover:border-emerald-500/50 hover:bg-emerald-500/5 text-white rounded-full font-semibold text-lg transition-all flex items-center justify-center space-x-2">
-                  <Play className="w-5 h-5 group-hover:scale-125 transition-transform" /><span>Watch Demo</span>
-                </button>
-              </div>
-              <div className="flex items-center space-x-6 pt-4">
-                <div className="flex -space-x-3">
-                  {['JM', 'KT', 'AS', 'RB', 'LC'].map((initials, i) => (
-                    <div key={i} className="w-10 h-10 rounded-full border-2 border-[#0a0f0d] bg-gradient-to-br from-gray-700 to-gray-800 flex items-center justify-center text-xs font-bold hover:scale-110 hover:z-10 transition-transform cursor-pointer">{initials}</div>
-                  ))}
-                </div>
-                <div>
-                  <div className="flex items-center space-x-1">{[1,2,3,4,5].map((i) => (<Star key={i} className="w-4 h-4 fill-amber-400 text-amber-400" />))}</div>
-                  <p className="text-sm text-gray-400">Trusted by <span className="text-white font-semibold">500+</span> coaches & players</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="relative" style={{ transform: `perspective(1000px) rotateY(${mousePosition.x * 0.3}deg) rotateX(${-mousePosition.y * 0.3}deg)` }}>
-              <div className="relative bg-gradient-to-br from-white/5 to-white/0 border border-white/10 rounded-3xl p-2 shadow-2xl hover:border-emerald-500/30 transition-colors duration-500">
-                <div className="relative aspect-video rounded-2xl overflow-hidden bg-gradient-to-br from-gray-900 to-gray-800">
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="text-center">
-                      <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-emerald-500/20 flex items-center justify-center border border-emerald-500/30 animate-[float_3s_ease-in-out_infinite]">
-                        <Play className="w-8 h-8 text-emerald-400 ml-1" />
-                      </div>
-                      <p className="text-gray-400">AI Analysis Demo</p>
-                    </div>
-                  </div>
-                  <div className="absolute bottom-4 left-4 right-4 bg-black/60 backdrop-blur-sm rounded-xl p-3 border border-white/10">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                          <Brain className="w-5 h-5 text-emerald-400" />
-                        </div>
-                        <div>
-                          <p className="text-white font-semibold text-sm">Decision Analyzed</p>
-                          <p className="text-emerald-400 text-xs">Optimal: Through ball to striker</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-2xl font-bold text-emerald-400">92</p>
-                        <p className="text-xs text-gray-400">IQ Score</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="absolute -top-4 -right-4 bg-gradient-to-br from-amber-500 to-amber-600 text-white px-4 py-2 rounded-full font-bold shadow-lg animate-[float_4s_ease-in-out_infinite]">
-                <span className="flex items-center space-x-1"><Zap className="w-4 h-4" /><span>AI Powered</span></span>
-              </div>
-              <div className="absolute -bottom-4 -left-4 bg-white/10 backdrop-blur-sm border border-white/20 px-4 py-2 rounded-full animate-[float_5s_ease-in-out_infinite]">
-                <span className="flex items-center space-x-2 text-sm"><Target className="w-4 h-4 text-emerald-400" /><span>Track Any Player</span></span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="py-12 border-y border-white/5 bg-white/[0.02]">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="flex items-center justify-center space-x-12 opacity-50">
-            <p className="text-gray-400 text-sm">Trusted by coaches from</p>
-            {['Premier League', 'La Liga', 'MLS', 'Youth Academies'].map((league) => (
-              <span key={league} className="text-gray-500 font-semibold">{league}</span>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section id="features" className="py-24 px-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16 scroll-animate">
-            <span className="text-emerald-400 font-semibold text-sm uppercase tracking-wider">Features</span>
-            <h2 className="text-4xl lg:text-5xl font-bold mt-4 mb-6">Everything You Need to<br /><span className="gradient-text">Elevate Your Game</span></h2>
-            <p className="text-gray-400 text-lg max-w-2xl mx-auto">Professional-grade analysis tools that were once only available to elite clubs, now in your hands.</p>
-          </div>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {[
-              { icon: Video, title: 'Video Upload & Analysis', desc: 'Upload any match footage and our AI will track player movements and identify key decision moments.', color: 'emerald' },
-              { icon: Brain, title: 'AI Decision Analysis', desc: 'Get instant feedback on every decision with detailed explanations of optimal plays.', color: 'amber' },
-              { icon: Target, title: 'Player Tracking', desc: 'Click on any player to track their movements and analyze their decision-making throughout the game.', color: 'blue' },
-              { icon: BarChart3, title: 'Performance Metrics', desc: 'Track your Decision IQ score over time and see measurable improvement in your tactical understanding.', color: 'purple' },
-              { icon: Users, title: 'Elite Comparisons', desc: 'Compare your decisions to what top professionals would do in the same situations.', color: 'pink' },
-              { icon: Award, title: 'Training Drills', desc: 'Access a library of drills designed to improve specific aspects of your tactical awareness.', color: 'orange' },
-            ].map((feature, i) => (
-              <div key={i} className={`scroll-animate stagger-${i + 1} card-hover bg-white/5 border border-white/10 rounded-2xl p-6 hover:border-${feature.color}-500/30`}>
-                <div className={`w-12 h-12 rounded-xl bg-${feature.color}-500/20 flex items-center justify-center mb-4`}>
-                  <feature.icon className={`w-6 h-6 text-${feature.color}-400`} />
-                </div>
-                <h3 className="text-xl font-bold text-white mb-2">{feature.title}</h3>
-                <p className="text-gray-400">{feature.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section id="how-it-works" className="py-24 px-6 bg-gradient-to-b from-transparent via-emerald-500/5 to-transparent">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16 scroll-animate">
-            <span className="text-emerald-400 font-semibold text-sm uppercase tracking-wider">How It Works</span>
-            <h2 className="text-4xl lg:text-5xl font-bold mt-4 mb-6">Three Steps to<br /><span className="gradient-text">Smarter Play</span></h2>
-          </div>
-          <div className="grid md:grid-cols-3 gap-8">
-            {[
-              { step: '01', title: 'Upload Your Footage', desc: 'Upload any match video - from professional broadcasts to phone recordings.', icon: Video },
-              { step: '02', title: 'Select a Player', desc: 'Click on the player you want to analyze. Our AI will track them throughout the video.', icon: Target },
-              { step: '03', title: 'Learn & Improve', desc: 'Review decision points, see what elite players would do, and track your improvement.', icon: TrendingUp },
-            ].map((item, i) => (
-              <div key={i} className={`scroll-animate stagger-${i + 1} text-center`}>
-                <div className="relative inline-block mb-6">
-                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-emerald-600/20 border border-emerald-500/30 flex items-center justify-center mx-auto">
-                    <item.icon className="w-8 h-8 text-emerald-400" />
-                  </div>
-                  <span className="absolute -top-2 -right-2 w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center text-sm font-bold">{item.step}</span>
-                </div>
-                <h3 className="text-xl font-bold text-white mb-2">{item.title}</h3>
-                <p className="text-gray-400">{item.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="py-24 px-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="grid lg:grid-cols-2 gap-16 items-center">
-            <div className="scroll-animate">
-              <span className="text-emerald-400 font-semibold text-sm uppercase tracking-wider">Stats That Matter</span>
-              <h2 className="text-4xl lg:text-5xl font-bold mt-4 mb-8">Real Results from<br /><span className="gradient-text">Real Players</span></h2>
-              <div className="grid grid-cols-2 gap-6">
-                {[
-                  { value: 500, suffix: '+', label: 'Active Users' },
-                  { value: 10000, suffix: '+', label: 'Videos Analyzed' },
-                  { value: 23, suffix: '%', label: 'Avg. IQ Improvement' },
-                  { value: 4.9, suffix: '', label: 'User Rating' },
-                ].map((stat, i) => (
-                  <div key={i} className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                    <p className="text-4xl font-bold text-emerald-400"><AnimatedCounter end={stat.value} suffix={stat.suffix} /></p>
-                    <p className="text-gray-400 mt-1">{stat.label}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="scroll-animate stagger-2">
-              <div className="bg-white/5 border border-white/10 rounded-2xl p-8">
-                <div className="flex items-center space-x-1 mb-4">{[1,2,3,4,5].map((i) => (<Star key={i} className="w-5 h-5 fill-amber-400 text-amber-400" />))}</div>
-                <p className="text-lg text-gray-300 mb-6">"PitchMind has completely changed how I analyze my game. The AI insights are incredibly accurate and have helped me make better decisions on the pitch. My coach has noticed a real improvement in my positioning and awareness."</p>
-                <div className="flex items-center space-x-4">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center font-bold">JM</div>
-                  <div>
-                    <p className="font-semibold text-white">James Miller</p>
-                    <p className="text-gray-400 text-sm">Youth Academy Player, U17</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="pricing" className="py-24 px-6 bg-gradient-to-b from-transparent via-amber-500/5 to-transparent">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16 scroll-animate">
-            <span className="text-emerald-400 font-semibold text-sm uppercase tracking-wider">Pricing</span>
-            <h2 className="text-4xl lg:text-5xl font-bold mt-4 mb-6">Start Free,<br /><span className="gradient-text">Upgrade Anytime</span></h2>
-          </div>
-          <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-            {[
-              { name: 'Free', price: '$0', period: 'forever', features: ['3 video uploads/month', 'Basic AI analysis', 'Decision IQ tracking', 'Community access'], cta: 'Get Started', popular: false },
-              { name: 'Pro', price: '$19', period: '/month', features: ['Unlimited uploads', 'Advanced AI insights', 'Elite player comparisons', 'Priority support', 'Export reports'], cta: 'Start Pro Trial', popular: true },
-              { name: 'Team', price: '$49', period: '/month', features: ['Everything in Pro', 'Team management', 'Multi-player analysis', 'Custom drills', 'API access'], cta: 'Contact Sales', popular: false },
-            ].map((plan, i) => (
-              <div key={i} className={`scroll-animate stagger-${i + 1} relative bg-white/5 border rounded-2xl p-8 ${plan.popular ? 'border-emerald-500/50 scale-105' : 'border-white/10'}`}>
-                {plan.popular && <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-emerald-500 text-white text-sm font-semibold px-4 py-1 rounded-full">Most Popular</div>}
-                <h3 className="text-xl font-bold text-white mb-2">{plan.name}</h3>
-                <div className="flex items-baseline space-x-1 mb-6">
-                  <span className="text-4xl font-bold text-white">{plan.price}</span>
-                  <span className="text-gray-400">{plan.period}</span>
-                </div>
-                <ul className="space-y-3 mb-8">
-                  {plan.features.map((feature, j) => (
-                    <li key={j} className="flex items-center space-x-3 text-gray-300">
-                      <Check className="w-5 h-5 text-emerald-400 flex-shrink-0" /><span>{feature}</span>
-                    </li>
-                  ))}
-                </ul>
-                <SignUpButton mode="modal">
-                  <button className={`w-full py-3 rounded-xl font-semibold transition-all ${plan.popular ? 'bg-emerald-500 hover:bg-emerald-400 text-white' : 'border border-white/20 hover:border-emerald-500/50 text-white'}`}>{plan.cta}</button>
-                </SignUpButton>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="py-24 px-6">
-        <div className="max-w-4xl mx-auto text-center scroll-animate">
-          <h2 className="text-4xl lg:text-5xl font-bold mb-6">Ready to Play<br /><span className="gradient-text">Smarter?</span></h2>
-          <p className="text-xl text-gray-400 mb-8">Join thousands of players and coaches using AI to elevate their game.</p>
-          <SignUpButton mode="modal">
-            <button className="group px-10 py-5 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white rounded-full font-semibold text-xl transition-all shadow-xl shadow-emerald-500/30 hover:shadow-emerald-500/50 flex items-center justify-center space-x-3 mx-auto btn-glow hover:scale-105">
-              <span>Start Your Free Trial</span><ArrowRight className="w-6 h-6 group-hover:translate-x-2 transition-transform" />
-            </button>
-          </SignUpButton>
-          <p className="text-gray-500 mt-4">No credit card required • Free forever plan available</p>
-        </div>
-      </section>
-
-      <footer className="py-12 px-6 border-t border-white/10">
-        <div className="max-w-7xl mx-auto">
-          <div className="grid md:grid-cols-4 gap-8 mb-8">
-            <div>
-              <div className="flex items-center space-x-3 mb-4">
-                <Logo size="sm" />
-                <span className="text-xl font-bold bg-gradient-to-r from-amber-400 to-amber-500 bg-clip-text text-transparent">PitchMind</span>
-              </div>
-              <p className="text-gray-400 text-sm">AI-powered soccer analysis to help players and coaches make better decisions.</p>
-            </div>
-            {[
-              { title: 'Product', links: ['Features', 'Pricing', 'Demo', 'API'] },
-              { title: 'Company', links: ['About', 'Blog', 'Careers', 'Contact'] },
-              { title: 'Legal', links: ['Privacy', 'Terms', 'Security'] },
-            ].map((col, i) => (
-              <div key={i}>
-                <h4 className="font-semibold text-white mb-4">{col.title}</h4>
-                <ul className="space-y-2">
-                  {col.links.map((link) => (<li key={link}><a href="#" className="text-gray-400 hover:text-white transition-colors text-sm">{link}</a></li>))}
-                </ul>
-              </div>
-            ))}
-          </div>
-          <div className="pt-8 border-t border-white/10 flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
-            <p className="text-gray-500 text-sm">© 2024 PitchMind. All rights reserved.</p>
-            <div className="flex items-center space-x-6">
-              {['Twitter', 'LinkedIn', 'Instagram'].map((social) => (
-                <a key={social} href="#" className="text-gray-400 hover:text-white transition-colors text-sm">{social}</a>
-              ))}
-            </div>
+          <div style={{
+            marginTop: '40px',
+            paddingTop: '24px',
+            borderTop: `1px solid ${c.border}`,
+            textAlign: 'center',
+            color: c.textMuted,
+            fontSize: '14px',
+          }}>
+            © 2025 PitchMind. All rights reserved.
           </div>
         </div>
       </footer>
     </div>
   );
-}
+};
+
+export default LandingPage;
