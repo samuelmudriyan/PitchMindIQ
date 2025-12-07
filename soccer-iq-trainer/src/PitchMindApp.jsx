@@ -2053,7 +2053,7 @@ export default function PitchMindApp() {
       case 'assistant': return <AICoachPage />;
       case 'planner': return <SessionPlannerPage />;
       case 'reports': return <ReportsPage />;
-      case 'drills': return (<PageWrapper title="Drill Library" showSearch sidebarCollapsed={sidebarCollapsed} searchQuery={searchQuery} setSearchQuery={setSearchQuery} currentPage="drills" setCurrentPage={setCurrentPage}><DrillsPage sessions={sessions} setCurrentPage={setCurrentPage} setSelectedDrillId={setSelectedDrillId} setShowModal={setShowModal} searchQuery={searchQuery} /></PageWrapper>);
+      case 'drills': return (<PageWrapper title="Drill Library" sidebarCollapsed={sidebarCollapsed} currentPage="drills" setCurrentPage={setCurrentPage}><DrillsPage onBack={() => setCurrentPage('dashboard')} onAddToSession={(drill) => { setSelectedDrill(drill); setShowModal('addToSession'); }} /></PageWrapper>);
       case 'drillDetail': return (<PageWrapper title="Drill Details" sidebarCollapsed={sidebarCollapsed} currentPage="drillDetail" setCurrentPage={setCurrentPage}><DrillDetailPage drillId={selectedDrillId} onBack={() => setCurrentPage('drills')} sessions={sessions} setSessions={setSessions} setShowModal={setShowModal} setSelectedDrill={setSelectedDrill} /></PageWrapper>);
       case 'stats': return <TeamStatsPage />;
       case 'progress': return <ProgressPage />;
