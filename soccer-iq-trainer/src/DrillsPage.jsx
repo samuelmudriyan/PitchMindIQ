@@ -36,7 +36,6 @@ const DrillsPage = ({ onAddToSession, onBack }) => {
     setSearchQuery('');
   };
 
-  // Shared select styles
   const selectStyle = {
     padding: '10px 14px',
     background: '#1a1f1c',
@@ -54,120 +53,8 @@ const DrillsPage = ({ onAddToSession, onBack }) => {
     paddingRight: 36
   };
 
-  const DrillCard = ({ drill }) => {
-    const isExpanded = expandedDrill === drill.id;
-    const cat = getCategoryInfo(drill.category);
-
-    if (viewMode === 'list') {
-      return (
-        <div 
-          onClick={() => setExpandedDrill(isExpanded ? null : drill.id)}
-          style={{ 
-            background: isExpanded ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.03)', 
-            borderRadius: 12, 
-            border: isExpanded ? '1px solid rgba(16,185,129,0.3)' : '1px solid rgba(255,255,255,0.08)', 
-            overflow: 'hidden',
-            cursor: 'pointer',
-            transition: 'all 0.2s'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', padding: 16, gap: 16 }}>
-            <div style={{ 
-              width: 44, height: 44, borderRadius: 10, 
-              background: `${cat.color}20`, 
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 20, flexShrink: 0
-            }}>
-              {cat.icon}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#fff' }}>{drill.name}</h3>
-                <span style={{ 
-                  fontSize: 11, padding: '3px 8px', borderRadius: 6,
-                  background: getDifficultyColor(drill.difficulty),
-                  color: '#fff', textTransform: 'capitalize', fontWeight: 500
-                }}>{drill.difficulty}</span>
-              </div>
-              <div style={{ display: 'flex', gap: 12, fontSize: 13, color: 'rgba(255,255,255,0.5)', marginTop: 4, flexWrap: 'wrap' }}>
-                <span>⏱️ {drill.duration}min</span>
-                <span>👥 {drill.players}</span>
-                <span style={{ color: cat.color }}>{cat.name}</span>
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
-              {drill.ageGroup?.slice(0, 2).map(age => (
-                <span key={age} style={{
-                  fontSize: 10, padding: '3px 6px', borderRadius: 4,
-                  background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)'
-                }}>{age.toUpperCase()}</span>
-              ))}
-            </div>
-            <div style={{ 
-              width: 28, height: 28, borderRadius: 6,
-              background: 'rgba(255,255,255,0.05)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: 'rgba(255,255,255,0.4)', fontSize: 18, flexShrink: 0,
-              transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition: 'transform 0.2s'
-            }}>▾</div>
-          </div>
-          {isExpanded && <DrillDetails drill={drill} cat={cat} />}
-        </div>
-      );
-    }
-
-    return (
-      <div style={{ 
-        background: 'rgba(255,255,255,0.03)', 
-        borderRadius: 14, 
-        border: '1px solid rgba(255,255,255,0.08)', 
-        overflow: 'hidden',
-        transition: 'all 0.2s'
-      }}>
-        <div
-          onClick={() => setExpandedDrill(isExpanded ? null : drill.id)}
-          style={{ padding: 18, cursor: 'pointer', borderLeft: `4px solid ${cat.color}` }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: 22 }}>{cat.icon}</span>
-              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#fff' }}>{drill.name}</h3>
-            </div>
-            <span style={{ 
-              fontSize: 11, padding: '3px 10px', borderRadius: 8,
-              background: getDifficultyColor(drill.difficulty),
-              color: '#fff', textTransform: 'capitalize', fontWeight: 500
-            }}>{drill.difficulty}</span>
-          </div>
-          <div style={{ display: 'flex', gap: 14, fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 12 }}>
-            <span>⏱️ {drill.duration}min</span>
-            <span>👥 {drill.players}</span>
-          </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-            {drill.ageGroup?.map(age => (
-              <span key={age} style={{
-                fontSize: 10, padding: '3px 8px', borderRadius: 5,
-                background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)'
-              }}>{age.toUpperCase()}</span>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {drill.focusAreas?.slice(0, 3).map((a, i) => (
-              <span key={i} style={{
-                fontSize: 11, padding: '3px 8px', borderRadius: 5,
-                background: `${cat.color}18`, color: cat.color
-              }}>{a}</span>
-            ))}
-          </div>
-        </div>
-        {isExpanded && <DrillDetails drill={drill} cat={cat} />}
-      </div>
-    );
-  };
-
   const DrillDetails = ({ drill, cat }) => (
-    <div style={{ padding: 18, borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.2)' }}>
+    <div style={{ padding: 18, borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.25)' }}>
       <div style={{ marginBottom: 18 }}>
         <h4 style={{ margin: '0 0 8px', fontSize: 13, color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>🎒 Equipment</h4>
         <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.5 }}>{drill.equipment?.join(', ') || 'None specified'}</p>
@@ -211,6 +98,125 @@ const DrillsPage = ({ onAddToSession, onBack }) => {
     </div>
   );
 
+  const DrillCard = ({ drill }) => {
+    const isExpanded = expandedDrill === drill.id;
+    const cat = getCategoryInfo(drill.category);
+
+    if (viewMode === 'list') {
+      return (
+        <div 
+          onClick={() => setExpandedDrill(isExpanded ? null : drill.id)}
+          style={{ 
+            background: isExpanded ? 'rgba(16,185,129,0.08)' : 'rgba(255,255,255,0.03)', 
+            borderRadius: 12, 
+            border: isExpanded ? '1px solid rgba(16,185,129,0.3)' : '1px solid rgba(255,255,255,0.08)', 
+            overflow: 'hidden',
+            cursor: 'pointer',
+            transition: 'all 0.2s'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', padding: 16, gap: 16 }}>
+            <div style={{ 
+              width: 44, height: 44, borderRadius: 10, 
+              background: `${cat.color}20`, 
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 20, flexShrink: 0
+            }}>{cat.icon}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#fff' }}>{drill.name}</h3>
+                <span style={{ 
+                  fontSize: 11, padding: '3px 8px', borderRadius: 6,
+                  background: getDifficultyColor(drill.difficulty),
+                  color: '#fff', textTransform: 'capitalize', fontWeight: 500
+                }}>{drill.difficulty}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 12, fontSize: 13, color: 'rgba(255,255,255,0.5)', marginTop: 4, flexWrap: 'wrap' }}>
+                <span>⏱️ {drill.duration}min</span>
+                <span>👥 {drill.players}</span>
+                <span style={{ color: cat.color }}>{cat.name}</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
+              {drill.ageGroup?.slice(0, 2).map(age => (
+                <span key={age} style={{
+                  fontSize: 10, padding: '3px 6px', borderRadius: 4,
+                  background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)'
+                }}>{age.toUpperCase()}</span>
+              ))}
+            </div>
+            <div style={{ 
+              width: 28, height: 28, borderRadius: 6,
+              background: 'rgba(255,255,255,0.05)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'rgba(255,255,255,0.4)', fontSize: 18, flexShrink: 0,
+              transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 0.2s'
+            }}>▾</div>
+          </div>
+          {isExpanded && <DrillDetails drill={drill} cat={cat} />}
+        </div>
+      );
+    }
+
+    // Grid view card
+    return (
+      <div style={{ 
+        background: isExpanded ? 'rgba(16,185,129,0.05)' : 'rgba(255,255,255,0.03)', 
+        borderRadius: 14, 
+        border: isExpanded ? '1px solid rgba(16,185,129,0.25)' : '1px solid rgba(255,255,255,0.08)', 
+        overflow: 'hidden',
+        transition: 'all 0.2s'
+      }}>
+        <div
+          onClick={() => setExpandedDrill(isExpanded ? null : drill.id)}
+          style={{ padding: 18, cursor: 'pointer', borderLeft: `4px solid ${cat.color}` }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 22 }}>{cat.icon}</span>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#fff' }}>{drill.name}</h3>
+            </div>
+            <span style={{ 
+              fontSize: 11, padding: '3px 10px', borderRadius: 8,
+              background: getDifficultyColor(drill.difficulty),
+              color: '#fff', textTransform: 'capitalize', fontWeight: 500
+            }}>{drill.difficulty}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 14, fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 12 }}>
+            <span>⏱️ {drill.duration}min</span>
+            <span>👥 {drill.players}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+            {drill.ageGroup?.map(age => (
+              <span key={age} style={{
+                fontSize: 10, padding: '3px 8px', borderRadius: 5,
+                background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)'
+              }}>{age.toUpperCase()}</span>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {drill.focusAreas?.slice(0, 3).map((a, i) => (
+              <span key={i} style={{
+                fontSize: 11, padding: '3px 8px', borderRadius: 5,
+                background: `${cat.color}18`, color: cat.color
+              }}>{a}</span>
+            ))}
+          </div>
+          {/* Expand indicator */}
+          <div style={{ 
+            marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'rgba(255,255,255,0.3)', fontSize: 12
+          }}>
+            {isExpanded ? '▲ Click to collapse' : '▼ Click for details'}
+          </div>
+        </div>
+        {isExpanded && <DrillDetails drill={drill} cat={cat} />}
+      </div>
+    );
+  };
+
   return (
     <div style={{ padding: 0 }}>
       {/* Header */}
@@ -247,9 +253,7 @@ const DrillsPage = ({ onAddToSession, onBack }) => {
       </div>
 
       {/* Filters Row */}
-      <div style={{ 
-        display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center'
-      }}>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
         <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)} style={selectStyle}>
           <option value="all" style={{ background: '#1a1f1c', color: '#fff' }}>All Categories</option>
           {drillCategories.map(c => (
@@ -297,45 +301,40 @@ const DrillsPage = ({ onAddToSession, onBack }) => {
         </div>
       </div>
 
-      {/* Category Pills - Horizontal scroll hidden */}
+      {/* Category Pills */}
       <div style={{ 
-        display: 'flex', gap: 8, marginBottom: 24, 
-        overflowX: 'auto', paddingBottom: 4,
-        scrollbarWidth: 'none', msOverflowStyle: 'none'
+        display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap'
       }}>
-        <style>{`.category-scroll::-webkit-scrollbar { display: none; }`}</style>
-        <div className="category-scroll" style={{ display: 'flex', gap: 8 }}>
-          <button
-            onClick={() => setSelectedCategory('all')}
-            style={{
-              padding: '8px 16px', whiteSpace: 'nowrap',
-              background: selectedCategory === 'all' ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)',
-              border: 'none', borderRadius: 20,
-              color: selectedCategory === 'all' ? '#fff' : 'rgba(255,255,255,0.6)',
-              cursor: 'pointer', fontSize: 13, fontWeight: 500,
-              transition: 'all 0.2s'
-            }}
-          >All ({safeDrillsData.length})</button>
-          {drillCategories.map(c => {
-            const count = safeDrillsData.filter(d => d.category === c.id).length;
-            const isActive = selectedCategory === c.id;
-            return (
-              <button
-                key={c.id}
-                onClick={() => setSelectedCategory(c.id)}
-                style={{
-                  padding: '8px 16px', whiteSpace: 'nowrap',
-                  background: isActive ? `${c.color}30` : 'rgba(255,255,255,0.05)',
-                  border: isActive ? `1px solid ${c.color}` : '1px solid transparent',
-                  borderRadius: 20,
-                  color: isActive ? c.color : 'rgba(255,255,255,0.6)',
-                  cursor: 'pointer', fontSize: 13, fontWeight: 500,
-                  transition: 'all 0.2s'
-                }}
-              >{c.icon} {c.name} ({count})</button>
-            );
-          })}
-        </div>
+        <button
+          onClick={() => setSelectedCategory('all')}
+          style={{
+            padding: '8px 16px',
+            background: selectedCategory === 'all' ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)',
+            border: 'none', borderRadius: 20,
+            color: selectedCategory === 'all' ? '#fff' : 'rgba(255,255,255,0.6)',
+            cursor: 'pointer', fontSize: 13, fontWeight: 500,
+            transition: 'all 0.2s'
+          }}
+        >All ({safeDrillsData.length})</button>
+        {drillCategories.map(c => {
+          const count = safeDrillsData.filter(d => d.category === c.id).length;
+          const isActive = selectedCategory === c.id;
+          return (
+            <button
+              key={c.id}
+              onClick={() => setSelectedCategory(c.id)}
+              style={{
+                padding: '8px 16px',
+                background: isActive ? `${c.color}30` : 'rgba(255,255,255,0.05)',
+                border: isActive ? `1px solid ${c.color}` : '1px solid transparent',
+                borderRadius: 20,
+                color: isActive ? c.color : 'rgba(255,255,255,0.6)',
+                cursor: 'pointer', fontSize: 13, fontWeight: 500,
+                transition: 'all 0.2s'
+              }}
+            >{c.icon} {c.name} ({count})</button>
+          );
+        })}
       </div>
 
       {/* Drills Grid/List */}
@@ -343,7 +342,8 @@ const DrillsPage = ({ onAddToSession, onBack }) => {
         <div style={{
           display: 'grid',
           gridTemplateColumns: viewMode === 'grid' ? 'repeat(auto-fill, minmax(320px, 1fr))' : '1fr',
-          gap: viewMode === 'grid' ? 18 : 12
+          gap: viewMode === 'grid' ? 18 : 12,
+          alignItems: 'start' // KEY: This makes cards expand independently!
         }}>
           {filteredDrills.map(drill => <DrillCard key={drill.id} drill={drill} />)}
         </div>
