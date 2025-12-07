@@ -607,15 +607,15 @@ export default function PitchMindApp() {
   const [activeClipIndex, setActiveClipIndex] = useState(null);
   const clipTimeoutRef = useRef(null);
   
-  const [players, setPlayers] = useState([]);
-  const [teams, setTeams] = useState([]);
+  const [players, setPlayers] = useState(() => loadFromStorage(STORAGE_KEYS.PLAYERS, []));
+  const [teams, setTeams] = useState(() => loadFromStorage(STORAGE_KEYS.TEAMS, []));
   const [selectedTeamFilter, setSelectedTeamFilter] = useState('all');
   const [videos, setVideos] = useState(() => loadFromStorage(STORAGE_KEYS.VIDEOS, []));
-  const [sessions, setSessions] = useState([]);
+  const [sessions, setSessions] = useState(() => loadFromStorage(STORAGE_KEYS.SESSIONS, []));
   const [reports, setReports] = useState(() => loadFromStorage(STORAGE_KEYS.REPORTS, []));
-  const [chatHistory, setChatHistory] = useState([]);
+  const [chatHistory, setChatHistory] = useState(() => loadFromStorage(STORAGE_KEYS.CHAT_HISTORY, []));
   const [userProfile, setUserProfile] = useState(null);
-  const [dataLoading, setDataLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(false);
   const [dataSynced, setDataSynced] = useState(false);
   
   const [showModal, setShowModal] = useState(null);
@@ -646,37 +646,48 @@ export default function PitchMindApp() {
     try {
       const data = await apiCall('/api/sync', user.id);
       setUserProfile(data.user);
-      setTeams(data.teams?.map(t => ({
-        ...t,
-        divisionName: t.division_name,
-        seasonName: t.season_name,
-        jerseyColor: t.jersey_color,
-        teamsnapId: t.teamsnap_id
-      })) || []);
-      setPlayers(data.players?.map(p => ({
-        ...p,
-        teamId: p.team_id,
-        teamName: p.team_name,
-        jerseyNumber: p.jersey_number,
-        jerseyColor: p.jersey_color,
-        teamsnapId: p.teamsnap_id,
-        importedFrom: p.imported_from,
-        analyses: []
-      })) || []);
-      setSessions(data.sessions?.map(s => ({
-        ...s,
-        drills: typeof s.drills === 'string' ? JSON.parse(s.drills) : s.drills
-      })) || []);
-      setChatHistory(data.chatHistory || []);
+      
+      // Only update if we got data back (don't overwrite with empty)
+      if (data.teams && data.teams.length > 0) {
+        setTeams(data.teams.map(t => ({
+          ...t,
+          divisionName: t.division_name,
+          seasonName: t.season_name,
+          jerseyColor: t.jersey_color,
+          teamsnapId: t.teamsnap_id
+        })));
+      }
+      
+      if (data.players && data.players.length > 0) {
+        setPlayers(data.players.map(p => ({
+          ...p,
+          teamId: p.team_id,
+          teamName: p.team_name,
+          jerseyNumber: p.jersey_number,
+          jerseyColor: p.jersey_color,
+          teamsnapId: p.teamsnap_id,
+          importedFrom: p.imported_from,
+          analyses: []
+        })));
+      }
+      
+      if (data.sessions && data.sessions.length > 0) {
+        setSessions(data.sessions.map(s => ({
+          ...s,
+          drills: typeof s.drills === 'string' ? JSON.parse(s.drills) : s.drills
+        })));
+      }
+      
+      if (data.chatHistory && data.chatHistory.length > 0) {
+        setChatHistory(data.chatHistory);
+      }
+      
       setDataSynced(true);
-      console.log('✅ Data synced from database:', data.teams?.length, 'teams,', data.players?.length, 'players');
+      console.log('✅ Data synced from database:', data.teams?.length || 0, 'teams,', data.players?.length || 0, 'players');
     } catch (err) {
-      console.error('Sync error, falling back to localStorage:', err);
-      // Fallback to localStorage if DB fails
-      setPlayers(loadFromStorage(STORAGE_KEYS.PLAYERS, []));
-      setTeams(loadFromStorage(STORAGE_KEYS.TEAMS, []));
-      setSessions(loadFromStorage(STORAGE_KEYS.SESSIONS, []));
-      setChatHistory(loadFromStorage(STORAGE_KEYS.CHAT_HISTORY, []));
+      console.warn('Database sync failed, using local data:', err.message);
+      // Keep existing localStorage data - don't overwrite
+      setDataSynced(true); // Mark as synced so we don't keep retrying
     }
     setDataLoading(false);
   };
@@ -762,16 +773,60 @@ export default function PitchMindApp() {
   const importTeamsnapPlayers = async (teamsnapPlayers, selectedIds, teamInfo) => {
     const toImport = teamsnapPlayers.filter(p => selectedIds.includes(p.id));
     
-    // First create team in DB if needed
-    let dbTeam = null;
-    if (teamInfo && user?.id) {
+    // Check if team already exists locally
+    const existingTeam = teams.find(t => 
+      String(t.teamsnapId) === String(teamInfo?.id) || 
+      String(t.teamsnap_id) === String(teamInfo?.id) ||
+      String(t.id) === String(teamInfo?.id)
+    );
+    
+    // Create local team first
+    const localTeam = existingTeam || {
+      id: teamInfo?.id || Date.now(),
+      name: teamInfo?.name || 'Imported Team',
+      divisionName: teamInfo?.divisionName,
+      seasonName: teamInfo?.seasonName,
+      teamsnapId: String(teamInfo?.id),
+      source: 'teamsnap'
+    };
+    
+    // Add team to state if new
+    if (!existingTeam && teamInfo) {
+      setTeams(prev => [...prev, localTeam]);
+    }
+    
+    // Create local players
+    const existingTeamsnapIds = players.filter(p => p.teamsnapId).map(p => String(p.teamsnapId));
+    const newPlayers = toImport
+      .filter(p => !existingTeamsnapIds.includes(String(p.id)))
+      .map(p => ({
+        id: Date.now() + Math.random(),
+        name: p.name,
+        position: mapTeamsnapPosition(p.position),
+        age: p.birthday ? calculateTeamsnapAge(p.birthday) : 0,
+        jerseyNumber: p.jerseyNumber,
+        jerseyColor: '#10b981',
+        rating: 70,
+        trend: 'same',
+        teamsnapId: String(p.id),
+        importedFrom: 'teamsnap',
+        teamId: localTeam.id,
+        teamName: localTeam.name,
+        analyses: []
+      }));
+    
+    // Add players to state immediately
+    if (newPlayers.length > 0) {
+      setPlayers(prev => [...prev, ...newPlayers]);
+    }
+    
+    console.log(`✅ Imported ${newPlayers.length} players locally`);
+    
+    // Try to save to database in background
+    if (user?.id && teamInfo) {
       try {
-        // Check if team already exists by teamsnap ID
-        const existingTeam = teams.find(t => 
-          String(t.teamsnap_id) === String(teamInfo.id) || 
-          String(t.teamsnapId) === String(teamInfo.id)
-        );
-        
+        // Create team in DB if not exists
+        let dbTeam = null;
         if (!existingTeam) {
           dbTeam = await apiCall('/api/teams', user.id, {
             method: 'POST',
@@ -783,74 +838,36 @@ export default function PitchMindApp() {
               source: 'teamsnap'
             })
           });
-          console.log('Created team in DB:', dbTeam);
-        } else {
-          dbTeam = existingTeam;
-          console.log('Using existing team:', dbTeam);
+          console.log('Team saved to DB:', dbTeam);
+        }
+        
+        // Create players in DB
+        const dbTeamId = dbTeam?.id || existingTeam?.id;
+        if (dbTeamId && newPlayers.length > 0) {
+          await apiCall('/api/players/bulk', user.id, {
+            method: 'POST',
+            body: JSON.stringify({ 
+              players: newPlayers.map(p => ({
+                name: p.name,
+                position: p.position,
+                age: p.age,
+                jerseyNumber: p.jerseyNumber,
+                jerseyColor: p.jerseyColor,
+                teamsnapId: p.teamsnapId,
+                importedFrom: 'teamsnap',
+                teamId: dbTeamId
+              })), 
+              teamId: dbTeamId 
+            })
+          });
+          console.log('Players saved to DB');
         }
       } catch (err) {
-        console.error('Failed to create team in DB:', err);
+        console.warn('Could not save to database, data saved locally:', err.message);
       }
     }
     
-    const dbTeamId = dbTeam?.id || null;
-    
-    // Format players for DB
-    const playersToCreate = toImport.map(p => ({
-      name: p.name,
-      position: mapTeamsnapPosition(p.position),
-      age: p.birthday ? calculateTeamsnapAge(p.birthday) : 0,
-      jerseyNumber: p.jerseyNumber,
-      jerseyColor: '#10b981',
-      teamsnapId: String(p.id),
-      importedFrom: 'teamsnap',
-      teamId: dbTeamId
-    }));
-    
-    // Save to database
-    let importedCount = 0;
-    if (user?.id && dbTeamId) {
-      try {
-        const result = await apiCall('/api/players/bulk', user.id, {
-          method: 'POST',
-          body: JSON.stringify({ players: playersToCreate, teamId: dbTeamId })
-        });
-        importedCount = result.count || 0;
-        console.log('Imported players to DB:', importedCount);
-        
-        // Re-sync all data from database to get proper IDs and relationships
-        await syncDataFromDB(true);
-        
-      } catch (err) {
-        console.error('Failed to save players to DB:', err);
-      }
-    } else {
-      // Fallback to local storage if no DB
-      const newPlayers = playersToCreate.map(p => ({
-        ...p,
-        id: Date.now() + Math.random(),
-        rating: 70,
-        trend: 'same',
-        teamName: teamInfo?.name || 'Unassigned',
-        analyses: []
-      }));
-      
-      // Add team locally if not exists
-      if (teamInfo && !teams.find(t => t.id === teamInfo.id)) {
-        setTeams([...teams, {
-          id: teamInfo.id,
-          name: teamInfo.name,
-          divisionName: teamInfo.divisionName,
-          seasonName: teamInfo.seasonName,
-          source: 'teamsnap'
-        }]);
-      }
-      
-      setPlayers([...players, ...newPlayers]);
-      importedCount = newPlayers.length;
-    }
-    
-    return importedCount;
+    return newPlayers.length;
   };
 
   const mapTeamsnapPosition = (pos) => {
@@ -956,51 +973,51 @@ export default function PitchMindApp() {
       setSaving(true);
       
       const playerData = {
+        id: editingItem?.id || Date.now(),
         name: form.name,
         position: form.position,
         age: parseInt(form.age),
         jerseyNumber: form.jerseyNumber ? parseInt(form.jerseyNumber) : null,
-        jerseyColor: form.jerseyColor
+        jerseyColor: form.jerseyColor || '#10b981',
+        rating: editingItem?.rating || 70,
+        trend: editingItem?.trend || 'same',
+        analyses: editingItem?.analyses || []
       };
       
-      try {
-        if (editingItem) {
-          // Update existing player
-          if (user?.id) {
+      // Update local state immediately
+      if (editingItem) {
+        setPlayers(players.map(p => p.id === editingItem.id ? { ...p, ...playerData } : p));
+      } else {
+        setPlayers(prev => [...prev, playerData]);
+      }
+      
+      // Try to save to database in background
+      if (user?.id) {
+        try {
+          if (editingItem) {
             await apiCall(`/api/players/${editingItem.id}`, user.id, {
               method: 'PUT',
               body: JSON.stringify(playerData)
             });
-          }
-          setPlayers(players.map(p => p.id === editingItem.id ? { ...p, ...playerData } : p));
-        } else {
-          // Create new player
-          let newPlayer;
-          if (user?.id) {
-            newPlayer = await apiCall('/api/players', user.id, {
+          } else {
+            const dbPlayer = await apiCall('/api/players', user.id, {
               method: 'POST',
               body: JSON.stringify(playerData)
             });
-          } else {
-            newPlayer = { id: Date.now(), ...playerData, rating: 70, trend: 'same', analyses: [] };
+            // Update with DB id if we got one
+            if (dbPlayer?.id) {
+              setPlayers(prev => prev.map(p => p.id === playerData.id ? { ...p, id: dbPlayer.id } : p));
+            }
           }
-          setPlayers([...players, { ...newPlayer, jerseyNumber: newPlayer.jersey_number || newPlayer.jerseyNumber, jerseyColor: newPlayer.jersey_color || newPlayer.jerseyColor }]);
+          console.log('✅ Player saved to database');
+        } catch (err) {
+          console.warn('Could not save to database, saved locally:', err.message);
         }
-        setShowModal(null);
-        setEditingItem(null);
-      } catch (err) {
-        console.error('Failed to save player:', err);
-        // Still update local state on error
-        const localPlayer = { id: editingItem?.id || Date.now(), ...playerData, rating: 70, trend: 'same', analyses: [] };
-        if (editingItem) {
-          setPlayers(players.map(p => p.id === editingItem.id ? localPlayer : p));
-        } else {
-          setPlayers([...players, localPlayer]);
-        }
-        setShowModal(null);
-        setEditingItem(null);
       }
+      
       setSaving(false);
+      setShowModal(null);
+      setEditingItem(null);
     };
     return (
       <Modal title={editingItem ? 'Edit Player' : 'Add New Player'} onClose={() => { setShowModal(null); setEditingItem(null); }} wide>
@@ -1421,59 +1438,115 @@ export default function PitchMindApp() {
     // Filter by search and team
     const filteredPlayers = players.filter(p => {
       const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.position.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesTeam = selectedTeamFilter === 'all' || p.teamId === selectedTeamFilter || (selectedTeamFilter === 'unassigned' && !p.teamId);
+      if (selectedTeamFilter === 'all') return matchesSearch;
+      if (selectedTeamFilter === 'unassigned') return matchesSearch && !p.teamId && !p.teamName;
+      // Match by team id or name
+      const selectedTeam = teams.find(t => t.id === selectedTeamFilter);
+      const matchesTeam = p.teamId === selectedTeamFilter || 
+        String(p.teamId) === String(selectedTeamFilter) ||
+        (selectedTeam && p.teamName === selectedTeam.name);
       return matchesSearch && matchesTeam;
     });
     
-    // Group players by team for display
+    // Group players by team for display - use teamName as grouping key for consistency
     const playersByTeam = {};
     filteredPlayers.forEach(p => {
-      const teamKey = p.teamId || 'unassigned';
+      // Find the team this player belongs to
+      const playerTeamName = p.teamName || 
+        teams.find(t => t.id === p.teamId || String(t.id) === String(p.teamId))?.name || 
+        'unassigned';
+      const teamKey = playerTeamName === 'unassigned' || !p.teamId ? 'unassigned' : playerTeamName;
       if (!playersByTeam[teamKey]) playersByTeam[teamKey] = [];
       playersByTeam[teamKey].push(p);
     });
     
-    const getTeamName = (teamId) => {
-      if (teamId === 'unassigned') return 'Unassigned Players';
-      const team = teams.find(t => t.id === teamId);
-      return team?.name || 'Unknown Team';
+    const getTeamName = (teamKey) => {
+      if (teamKey === 'unassigned' || !teamKey) return 'Unassigned Players';
+      return teamKey; // teamKey is now the actual team name
     };
+    
+    // Get teams with player counts, filter out empty duplicates
+    const teamsWithCounts = teams.map(team => {
+      const count = players.filter(p => 
+        p.teamId === team.id || 
+        String(p.teamId) === String(team.id) ||
+        p.teamId === team.teamsnapId ||
+        String(p.teamId) === String(team.teamsnapId) ||
+        p.teamName === team.name
+      ).length;
+      return { ...team, playerCount: count };
+    });
+    
+    // Remove duplicate teams (keep ones with players, or unique names)
+    const uniqueTeams = teamsWithCounts.reduce((acc, team) => {
+      const existing = acc.find(t => t.name === team.name);
+      if (!existing) {
+        acc.push(team);
+      } else if (team.playerCount > existing.playerCount) {
+        // Replace with the one that has more players
+        const idx = acc.indexOf(existing);
+        acc[idx] = team;
+      }
+      return acc;
+    }, []);
     
     return (
       <PageWrapper title="Player Profiles" showSearch sidebarCollapsed={sidebarCollapsed} searchQuery={searchQuery} setSearchQuery={setSearchQuery} currentPage="players" setCurrentPage={setCurrentPage}>
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-2xl font-bold text-white">Your Players</h2>
-            <p className="text-gray-400 mt-1">{players.length} player{players.length !== 1 ? 's' : ''} across {teams.length} team{teams.length !== 1 ? 's' : ''}</p>
+            <p className="text-gray-400 mt-1">{players.length} player{players.length !== 1 ? 's' : ''} across {uniqueTeams.filter(t => t.playerCount > 0).length} team{uniqueTeams.filter(t => t.playerCount > 0).length !== 1 ? 's' : ''}</p>
           </div>
           <button onClick={() => setShowModal('player')} className="flex items-center space-x-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl font-semibold transition-all"><Plus className="w-5 h-5" /><span>Add Player</span></button>
         </div>
         
         {/* Team Filter Tabs */}
-        {teams.length > 0 && (
+        {uniqueTeams.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-6">
             <button onClick={() => setSelectedTeamFilter('all')} className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${selectedTeamFilter === 'all' ? 'bg-emerald-500 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>
               All Teams ({players.length})
             </button>
-            {teams.map(team => {
-              const count = players.filter(p => p.teamId === team.id).length;
-              return (
-                <button key={team.id} onClick={() => setSelectedTeamFilter(team.id)} className={`px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center space-x-2 ${selectedTeamFilter === team.id ? 'bg-emerald-500 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>
+            {uniqueTeams.map(team => (
+              <div key={team.id} className="flex items-center">
+                <button onClick={() => setSelectedTeamFilter(team.id)} className={`px-4 py-2 ${team.playerCount === 0 ? 'rounded-l-xl' : 'rounded-xl'} text-sm font-medium transition-all flex items-center space-x-2 ${selectedTeamFilter === team.id ? 'bg-emerald-500 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>
                   <span>{team.name}</span>
-                  <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs">{count}</span>
+                  <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs">{team.playerCount}</span>
                 </button>
-              );
-            })}
+                {team.playerCount === 0 && (
+                  <button onClick={() => deleteTeam(team.id)} className="px-2 py-2 bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded-r-xl text-sm" title="Delete empty team">
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            ))}
             {players.some(p => !p.teamId) && (
               <button onClick={() => setSelectedTeamFilter('unassigned')} className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${selectedTeamFilter === 'unassigned' ? 'bg-emerald-500 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>
                 Unassigned ({players.filter(p => !p.teamId).length})
+              </button>
+            )}
+            {uniqueTeams.filter(t => t.playerCount === 0).length > 1 && (
+              <button 
+                onClick={() => {
+                  if (window.confirm(`Delete all ${uniqueTeams.filter(t => t.playerCount === 0).length} empty teams?`)) {
+                    const emptyTeamIds = uniqueTeams.filter(t => t.playerCount === 0).map(t => t.id);
+                    emptyTeamIds.forEach(id => {
+                      if (user?.id) {
+                        apiCall(`/api/teams/${id}`, user.id, { method: 'DELETE' }).catch(console.error);
+                      }
+                    });
+                    setTeams(teams.filter(t => !emptyTeamIds.includes(t.id)));
+                  }
+                }} 
+                className="px-4 py-2 rounded-xl text-sm font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all"
+              >
+                Clean up empty teams
               </button>
             )}
           </div>
         )}
         
         {players.length === 0 ? <EmptyState icon={Users} title="No players yet" description="Add your first player with jersey number and color to start tracking." actionLabel="Add Your First Player" onAction={() => setShowModal('player')} />
-        : selectedTeamFilter === 'all' && teams.length > 0 ? (
+        : selectedTeamFilter === 'all' && uniqueTeams.length > 0 ? (
           // Show grouped by team
           <div className="space-y-8">
             {Object.keys(playersByTeam).map(teamId => (
