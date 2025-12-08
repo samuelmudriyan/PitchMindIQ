@@ -10,27 +10,6 @@ import PitchMindApp from './PitchMindApp';
 // Your backend URL (Railway)
 const API_BASE = 'https://pitchmind-backend-production-483d.up.railway.app';
 
-// Stripe price IDs - YOU MUST CREATE THESE IN STRIPE DASHBOARD
-// Go to Stripe Dashboard > Products > Create Product > Add Prices
-const STRIPE_PRICES = {
-  starter: {
-    monthly: 'price_starter_monthly', // Replace with real Stripe price ID
-    annual: 'price_starter_annual',   // Replace with real Stripe price ID
-  },
-  pro: {
-    monthly: 'price_pro_monthly',
-    annual: 'price_pro_annual',
-  },
-  elite: {
-    monthly: 'price_elite_monthly',
-    annual: 'price_elite_annual',
-  },
-  club: {
-    monthly: 'price_club_monthly',
-    annual: 'price_club_annual',
-  },
-};
-
 // Custom Clerk appearance
 const clerkAppearance = {
   variables: {
@@ -155,24 +134,12 @@ function App() {
     setIsRedirectingToStripe(true);
     
     try {
-      const priceId = STRIPE_PRICES[selectedPlan.tier]?.[selectedPlan.cycle];
-      
-      if (!priceId || priceId.startsWith('price_')) {
-        // Price IDs not configured yet - show error
-        console.error('Stripe price IDs not configured');
-        alert('Payment system is being set up. Please try again later or contact support.');
-        setIsRedirectingToStripe(false);
-        setSelectedPlan(null);
-        return;
-      }
-      
       const response = await fetch(`${API_BASE}/api/stripe/create-checkout-session`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          priceId,
           userId: user.id,
           userEmail: user.primaryEmailAddress?.emailAddress,
           planTier: selectedPlan.tier,
