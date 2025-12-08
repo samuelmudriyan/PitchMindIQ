@@ -75,7 +75,9 @@ function App() {
   const [selectedPlan, setSelectedPlan] = useState(null); // { tier: 'pro', cycle: 'annual' }
   const [isRedirectingToStripe, setIsRedirectingToStripe] = useState(false);
   const [hasActiveSubscription, setHasActiveSubscription] = useState(null); // null = loading, true/false
-
+  const GOD_MODE_USERS = [
+  'user_36YF20ErXqkS9KY1OHRgFAFUMdk', 
+];
   // Check for Stripe success/cancel URL params
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
