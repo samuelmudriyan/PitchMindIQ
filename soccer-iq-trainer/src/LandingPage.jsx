@@ -4,11 +4,21 @@ import React, { useState, useEffect } from 'react';
 // PITCHMIND LANDING PAGE - Professional, Clean Design
 // ============================================================================
 
-const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
+const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn, logoUrl }) => {
   const [activeSection, setActiveSection] = useState('home');
   const [showModal, setShowModal] = useState(null); // 'privacy' | 'about' | null
   const [billingCycle, setBillingCycle] = useState('annual');
   const [scrolled, setScrolled] = useState(false);
+
+  // Debug: Log props on mount
+  useEffect(() => {
+    console.log('LandingPage mounted with props:', { 
+      hasOnGetStarted: !!onGetStarted, 
+      hasOnLogin: !!onLogin, 
+      hasOnSelectPlan: !!onSelectPlan,
+      isSignedIn 
+    });
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -36,7 +46,7 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
   // Pricing tiers
   const tiers = [
     {
-      id: 'base',
+      id: 'starter',
       name: 'Starter',
       price: { monthly: 5, annual: 48 },
       originalPrice: { monthly: 10, annual: 96 },
@@ -141,24 +151,45 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
         transition: 'all 0.3s ease',
       }}>
         {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{
-            width: '40px',
-            height: '40px',
-            borderRadius: '10px',
-            background: 'linear-gradient(135deg, #10b981, #059669)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '20px',
-          }}>⚽</div>
-          <span style={{ 
-            fontSize: '22px', 
-            fontWeight: '700',
-            letterSpacing: '-0.02em',
-          }}>
-            Pitch<span className="gradient-text">Mind</span>
-          </span>
+        <div 
+          style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}
+          onClick={() => scrollTo('home')}
+        >
+          {logoUrl ? (
+            <img 
+              src={logoUrl} 
+              alt="PitchMind Logo" 
+              style={{
+                height: '40px',
+                width: 'auto',
+                objectFit: 'contain',
+              }}
+            />
+          ) : (
+            <>
+              <div style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '10px',
+                background: 'linear-gradient(135deg, #10b981, #059669)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '20px',
+                flexShrink: 0,
+              }}>
+                ⚽
+              </div>
+              <span style={{ 
+                fontSize: '22px', 
+                fontWeight: '700',
+                letterSpacing: '-0.02em',
+                color: '#ffffff',
+              }}>
+                Pitch<span style={{ color: '#10b981' }}>Mind</span>
+              </span>
+            </>
+          )}
         </div>
 
         {/* Nav Links */}
@@ -169,6 +200,7 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
             { id: 'pricing', label: 'Pricing' },
           ].map(item => (
             <button
+              type="button"
               key={item.id}
               onClick={() => scrollTo(item.id)}
               style={{
@@ -198,6 +230,7 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
             </button>
           ))}
           <button
+            type="button"
             onClick={() => setShowModal('about')}
             style={{
               background: 'none',
@@ -217,7 +250,17 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
         {/* Auth Buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <button
-            onClick={onLogin}
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              console.log('Sign In clicked, onLogin exists:', !!onLogin);
+              if (typeof onLogin === 'function') {
+                onLogin();
+              } else {
+                console.error('onLogin is not a function!');
+              }
+            }}
             style={{
               background: 'none',
               border: 'none',
@@ -226,12 +269,24 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
               fontWeight: '500',
               cursor: 'pointer',
               padding: '10px 16px',
+              zIndex: 10,
+              position: 'relative',
             }}
           >
             Sign In
           </button>
           <button
-            onClick={onGetStarted}
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              console.log('Get Started clicked, onGetStarted exists:', !!onGetStarted);
+              if (typeof onGetStarted === 'function') {
+                onGetStarted();
+              } else {
+                console.error('onGetStarted is not a function!');
+              }
+            }}
             style={{
               background: '#10b981',
               border: 'none',
@@ -242,6 +297,8 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
               cursor: 'pointer',
               padding: '10px 20px',
               transition: 'all 0.2s',
+              zIndex: 10,
+              position: 'relative',
             }}
             onMouseOver={e => e.target.style.background = '#059669'}
             onMouseOut={e => e.target.style.background = '#10b981'}
@@ -339,7 +396,12 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
           {/* CTA Buttons */}
           <div className="animate-in delay-3" style={{ display: 'flex', gap: '16px', justifyContent: 'center' }}>
             <button
-              onClick={onGetStarted}
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                console.log('Hero Start Free Trial clicked');
+                if (typeof onGetStarted === 'function') onGetStarted();
+              }}
               style={{
                 background: 'linear-gradient(135deg, #10b981, #059669)',
                 border: 'none',
@@ -354,21 +416,27 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
                 gap: '8px',
                 transition: 'transform 0.2s, box-shadow 0.2s',
                 boxShadow: '0 4px 20px rgba(16, 185, 129, 0.3)',
+                zIndex: 10,
+                position: 'relative',
               }}
               onMouseOver={e => {
-                e.target.style.transform = 'translateY(-2px)';
-                e.target.style.boxShadow = '0 8px 30px rgba(16, 185, 129, 0.4)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 8px 30px rgba(16, 185, 129, 0.4)';
               }}
               onMouseOut={e => {
-                e.target.style.transform = 'translateY(0)';
-                e.target.style.boxShadow = '0 4px 20px rgba(16, 185, 129, 0.3)';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 4px 20px rgba(16, 185, 129, 0.3)';
               }}
             >
               Start Free Trial
               <span style={{ fontSize: '18px' }}>→</span>
             </button>
             <button
-              onClick={() => scrollTo('how-it-works')}
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                scrollTo('how-it-works');
+              }}
               style={{
                 background: 'rgba(255,255,255,0.03)',
                 border: '1px solid rgba(255,255,255,0.1)',
@@ -379,14 +447,16 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
                 cursor: 'pointer',
                 padding: '16px 32px',
                 transition: 'all 0.2s',
+                zIndex: 10,
+                position: 'relative',
               }}
               onMouseOver={e => {
-                e.target.style.background = 'rgba(255,255,255,0.06)';
-                e.target.style.borderColor = 'rgba(255,255,255,0.2)';
+                e.currentTarget.style.background = 'rgba(255,255,255,0.06)';
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)';
               }}
               onMouseOut={e => {
-                e.target.style.background = 'rgba(255,255,255,0.03)';
-                e.target.style.borderColor = 'rgba(255,255,255,0.1)';
+                e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
               }}
             >
               See How It Works
@@ -823,7 +893,18 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
                   </ul>
 
                   <button
-                    onClick={() => onSelectPlan ? onSelectPlan(tier.id, billingCycle) : onGetStarted()}
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      console.log('Pricing button clicked:', tier.id, billingCycle);
+                      if (typeof onSelectPlan === 'function') {
+                        onSelectPlan(tier.id, billingCycle);
+                      } else if (typeof onGetStarted === 'function') {
+                        onGetStarted();
+                      } else {
+                        console.error('No handler available for pricing button');
+                      }
+                    }}
                     style={{
                       width: '100%',
                       padding: '12px',
@@ -835,17 +916,19 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
                       fontWeight: '600',
                       cursor: 'pointer',
                       transition: 'all 0.2s',
+                      zIndex: 10,
+                      position: 'relative',
                     }}
                     onMouseOver={e => {
                       if (!tier.popular) {
-                        e.target.style.background = 'rgba(255,255,255,0.05)';
-                        e.target.style.borderColor = 'rgba(255,255,255,0.2)';
+                        e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)';
                       }
                     }}
                     onMouseOut={e => {
                       if (!tier.popular) {
-                        e.target.style.background = 'transparent';
-                        e.target.style.borderColor = 'rgba(255,255,255,0.1)';
+                        e.currentTarget.style.background = 'transparent';
+                        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
                       }
                     }}
                   >
@@ -894,7 +977,12 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
             Join 500+ coaches already using AI to develop smarter players.
           </p>
           <button
-            onClick={onGetStarted}
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              console.log('Bottom CTA clicked');
+              if (typeof onGetStarted === 'function') onGetStarted();
+            }}
             style={{
               background: 'linear-gradient(135deg, #10b981, #059669)',
               border: 'none',
@@ -906,14 +994,16 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
               padding: '16px 40px',
               boxShadow: '0 4px 20px rgba(16, 185, 129, 0.3)',
               transition: 'all 0.2s',
+              zIndex: 10,
+              position: 'relative',
             }}
             onMouseOver={e => {
-              e.target.style.transform = 'translateY(-2px)';
-              e.target.style.boxShadow = '0 8px 30px rgba(16, 185, 129, 0.4)';
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = '0 8px 30px rgba(16, 185, 129, 0.4)';
             }}
             onMouseOut={e => {
-              e.target.style.transform = 'translateY(0)';
-              e.target.style.boxShadow = '0 4px 20px rgba(16, 185, 129, 0.3)';
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 4px 20px rgba(16, 185, 129, 0.3)';
             }}
           >
             Start Your Free Trial →
@@ -950,6 +1040,7 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
 
           <div style={{ display: 'flex', gap: '32px' }}>
             <button
+              type="button"
               onClick={() => setShowModal('privacy')}
               style={{
                 background: 'none',
@@ -965,6 +1056,7 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
               Privacy Policy
             </button>
             <button
+              type="button"
               onClick={() => setShowModal('about')}
               style={{
                 background: 'none',
