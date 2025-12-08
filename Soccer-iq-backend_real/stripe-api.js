@@ -634,8 +634,8 @@ module.exports = router;
 // ============================================================================
 /*
 # Stripe Keys
-STRIPE_SECRET_KEY=sk_live_...  (or sk_test_... for testing)
-STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_SECRET_KEY=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
+STRIPE_WEBHOOK_SECRET=whsec_sH2fv2TrQQL2uBZ52P3Z3sdfxzDUaxFp
 
 # Stripe Price IDs (create these in Stripe Dashboard > Products)
 STRIPE_PRICE_STARTER_MONTHLY=price_1Sbxb4AyDeenfxMVEjSXHutj
