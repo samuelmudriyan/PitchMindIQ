@@ -12,8 +12,7 @@ const API_BASE = 'https://pitchmind-backend-production-483d.up.railway.app';
 
 // GOD MODE - Add your Clerk user ID here to bypass payment
 const GOD_MODE_USERS = [
-  // Add your Clerk user ID here (find it in Clerk Dashboard > Users)
-  // Example: 'user_2abc123def456'
+  'user_36YF20ErXqkS9KY1OHRgFAFUMdk',  // Samuel's account
 ];
 
 // Custom Clerk appearance
@@ -75,9 +74,7 @@ function App() {
   const [selectedPlan, setSelectedPlan] = useState(null); // { tier: 'pro', cycle: 'annual' }
   const [isRedirectingToStripe, setIsRedirectingToStripe] = useState(false);
   const [hasActiveSubscription, setHasActiveSubscription] = useState(null); // null = loading, true/false
-  const GOD_MODE_USERS = [
-  'user_36YF20ErXqkS9KY1OHRgFAFUMdk', 
-];
+
   // Check for Stripe success/cancel URL params
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -273,9 +270,20 @@ function App() {
 
   // Check if user is in god mode
   const isGodMode = isSignedIn && user && GOD_MODE_USERS.includes(user.id);
+  
+  // DEBUG: Log god mode check
+  if (isSignedIn && user) {
+    console.log('=== GOD MODE DEBUG ===');
+    console.log('User ID:', user.id);
+    console.log('GOD_MODE_USERS:', GOD_MODE_USERS);
+    console.log('Is in array:', GOD_MODE_USERS.includes(user.id));
+    console.log('isGodMode:', isGodMode);
+    console.log('hasActiveSubscription:', hasActiveSubscription);
+  }
 
   // Signed in with active subscription OR god mode - show main app
   if (isSignedIn && (hasActiveSubscription === true || isGodMode)) {
+    console.log('✅ Showing PitchMindApp (subscription or god mode)');
     return <PitchMindApp />;
   }
 
@@ -317,18 +325,31 @@ function App() {
 
   // Signed in but no subscription - show landing page to pick a plan
   // OR not signed in - show landing page
+  
+  // DEBUG LOGGING
+  console.log('=== APP RENDER DEBUG ===');
+  console.log('showAuth:', showAuth);
+  console.log('isSignedIn:', isSignedIn);
+  console.log('Modal should show:', showAuth && !isSignedIn);
+  
   return (
     <>
       <LandingPage 
         onGetStarted={() => {
-          console.log('App.jsx: onGetStarted called, setting showAuth=true, authMode=signUp');
+          console.log('App.jsx: onGetStarted called');
+          console.log('App.jsx: isSignedIn =', isSignedIn);
+          console.log('App.jsx: showAuth before =', showAuth);
           setAuthMode('signUp');
           setShowAuth(true);
+          console.log('App.jsx: showAuth set to true');
         }}
         onLogin={() => {
-          console.log('App.jsx: onLogin called, setting showAuth=true, authMode=signIn');
+          console.log('App.jsx: onLogin called');
+          console.log('App.jsx: isSignedIn =', isSignedIn);
+          console.log('App.jsx: showAuth before =', showAuth);
           setAuthMode('signIn');
           setShowAuth(true);
+          console.log('App.jsx: showAuth set to true');
         }}
         onSelectPlan={handleSelectPlan}
         isSignedIn={isSignedIn}
@@ -340,7 +361,7 @@ function App() {
         <div style={{
           position: 'fixed',
           inset: 0,
-          zIndex: 1000,
+          zIndex: 9999,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
