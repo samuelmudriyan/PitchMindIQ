@@ -10,6 +10,12 @@ import PitchMindApp from './PitchMindApp';
 // Your backend URL (Railway)
 const API_BASE = 'https://pitchmind-backend-production-483d.up.railway.app';
 
+// GOD MODE - Add your Clerk user ID here to bypass payment
+const GOD_MODE_USERS = [
+  // Add your Clerk user ID here (find it in Clerk Dashboard > Users)
+  // Example: 'user_2abc123def456'
+];
+
 // Custom Clerk appearance
 const clerkAppearance = {
   variables: {
@@ -69,9 +75,7 @@ function App() {
   const [selectedPlan, setSelectedPlan] = useState(null); // { tier: 'pro', cycle: 'annual' }
   const [isRedirectingToStripe, setIsRedirectingToStripe] = useState(false);
   const [hasActiveSubscription, setHasActiveSubscription] = useState(null); // null = loading, true/false
-  const GOD_MODE_USERS = [
-  'user_36Pd0pC8IvDIB0bU48uOMtvrmlk',  // Your actual Clerk user ID
-];
+
   // Check for Stripe success/cancel URL params
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -98,12 +102,13 @@ function App() {
     }
   }, [isSignedIn, user]);
 
-  // After sign-in, if a plan was selected, redirect to Stripe
+  // After sign-in, if a plan was selected, redirect to Stripe (skip for god mode)
   useEffect(() => {
-    if (isSignedIn && selectedPlan && !isRedirectingToStripe && hasActiveSubscription === false) {
+    const isGodModeUser = user && GOD_MODE_USERS.includes(user.id);
+    if (isSignedIn && selectedPlan && !isRedirectingToStripe && hasActiveSubscription === false && !isGodModeUser) {
       redirectToStripeCheckout();
     }
-  }, [isSignedIn, selectedPlan, hasActiveSubscription]);
+  }, [isSignedIn, selectedPlan, hasActiveSubscription, user]);
 
   // Check if user has active subscription
   const checkSubscriptionStatus = async () => {
@@ -264,8 +269,11 @@ function App() {
     );
   }
 
-  // Signed in with active subscription - show main app
-  if (isSignedIn && hasActiveSubscription === true) {
+  // Check if user is in god mode
+  const isGodMode = isSignedIn && user && GOD_MODE_USERS.includes(user.id);
+
+  // Signed in with active subscription OR god mode - show main app
+  if (isSignedIn && (hasActiveSubscription === true || isGodMode)) {
     return <PitchMindApp />;
   }
 
@@ -311,15 +319,18 @@ function App() {
     <>
       <LandingPage 
         onGetStarted={() => {
+          console.log('App.jsx: onGetStarted called, setting showAuth=true, authMode=signUp');
           setAuthMode('signUp');
           setShowAuth(true);
         }}
         onLogin={() => {
+          console.log('App.jsx: onLogin called, setting showAuth=true, authMode=signIn');
           setAuthMode('signIn');
           setShowAuth(true);
         }}
         onSelectPlan={handleSelectPlan}
         isSignedIn={isSignedIn}
+        logoUrl="/logo.png"  // Add your logo to public folder, or use a full URL
       />
 
       {/* Auth Modal */}
