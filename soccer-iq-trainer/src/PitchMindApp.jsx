@@ -3,6 +3,7 @@ import { useUser, UserButton } from '@clerk/clerk-react';
 import { Upload, CheckCircle, AlertCircle, Loader2, Clock, Brain, Video, Zap, MousePointer, Target, Sparkles, Award, RotateCcw, Share2, Download, Save, Plus, X, ChevronRight, ChevronLeft, Home, Users, FileVideo, Lightbulb, Clipboard, FileText, BookOpen, BarChart3, TrendingUp, Bell, Settings, Search, Calendar, Edit, Trash2, Eye, PlayCircle, Send, Timer, ArrowUp, ArrowDown, ArrowRight, Play, Pause, StopCircle, User, Hash, Palette, Link2, RefreshCw, Check, Database } from 'lucide-react';
 import logo from './assets/logo.png';
 import DrillDetailPage from './DrillDetailPage';
+import FormationCreator from './FormationCreator';
 import DrillsPage from './DrillsPage';
 import { drillsData } from './DrillData';
 
@@ -483,6 +484,7 @@ const Sidebar = ({ currentPage, setCurrentPage, sidebarCollapsed, setSidebarColl
         <SidebarItem icon={FileText} label="Auto Reports" active={currentPage === 'reports'} onClick={() => setCurrentPage('reports')} />
         <SidebarItem icon={BookOpen} label="Drill Library" active={currentPage === 'drills' || currentPage === 'drillDetail'} onClick={() => setCurrentPage('drills')} />
         {!sidebarCollapsed && <div className="pt-4 pb-2"><div className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-3">Analytics</div></div>}
+        <SidebarItem icon={Target} label="Formations" active={currentPage === 'formations'} onClick={() => setCurrentPage('formations')} />
         <SidebarItem icon={BarChart3} label="Team Stats" active={currentPage === 'stats'} onClick={() => setCurrentPage('stats')} />
         <SidebarItem icon={TrendingUp} label="Progress" active={currentPage === 'progress'} onClick={() => setCurrentPage('progress')} />
         <SidebarItem icon={Target} label="Benchmarks" active={currentPage === 'benchmarks'} onClick={() => setCurrentPage('benchmarks')} />
@@ -2078,6 +2080,7 @@ useEffect(() => {
       case 'planner': return <SessionPlannerPage />;
       case 'reports': return <ReportsPage />;
       case 'drills': return (<PageWrapper title="Drill Library" showSearch sidebarCollapsed={sidebarCollapsed} searchQuery={searchQuery} setSearchQuery={setSearchQuery} currentPage="drills" setCurrentPage={setCurrentPage}><DrillsPage sessions={sessions} setCurrentPage={setCurrentPage} setSelectedDrillId={setSelectedDrillId} setShowModal={setShowModal} searchQuery={searchQuery} /></PageWrapper>);
+      case 'formations': return (<PageWrapper title="Formation Creator" sidebarCollapsed={sidebarCollapsed} currentPage="formations" setCurrentPage={setCurrentPage}><FormationCreator onSave={(formation) => console.log('Saved:', formation)} teamName={user?.firstName ? `${user.firstName}'s Team` : 'My Team'} /></PageWrapper>);
       case 'drillDetail': return (<PageWrapper title="Drill Details" sidebarCollapsed={sidebarCollapsed} currentPage="drillDetail" setCurrentPage={setCurrentPage}><DrillDetailPage drillId={selectedDrillId} onBack={() => setCurrentPage('drills')} sessions={sessions} setSessions={setSessions} setShowModal={setShowModal} setSelectedDrill={setSelectedDrill} /></PageWrapper>);
       case 'stats': return <TeamStatsPage />;
       case 'progress': return <ProgressPage />;
