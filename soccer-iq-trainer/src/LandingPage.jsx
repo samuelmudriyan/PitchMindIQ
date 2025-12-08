@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 // PITCHMIND LANDING PAGE - Professional, Clean Design
 // ============================================================================
 
-const LandingPage = ({ onGetStarted, onLogin }) => {
+const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn }) => {
   const [activeSection, setActiveSection] = useState('home');
   const [showModal, setShowModal] = useState(null); // 'privacy' | 'about' | null
   const [billingCycle, setBillingCycle] = useState('annual');
@@ -823,7 +823,7 @@ const LandingPage = ({ onGetStarted, onLogin }) => {
                   </ul>
 
                   <button
-                    onClick={onGetStarted}
+                    onClick={() => onSelectPlan ? onSelectPlan(tier.id, billingCycle) : onGetStarted()}
                     style={{
                       width: '100%',
                       padding: '12px',
