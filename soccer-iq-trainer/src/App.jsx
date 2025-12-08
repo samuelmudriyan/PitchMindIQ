@@ -330,7 +330,7 @@ function App() {
         }}
         onSelectPlan={handleSelectPlan}
         isSignedIn={isSignedIn}
-        logoUrl="soccer-iq-trainer/src/assets/logo.png"  // Add your logo to public folder, or use a full URL
+       logoUrl="/logo.png"  // Add your logo to public folder, or use a full URL
       />
 
       {/* Auth Modal */}
