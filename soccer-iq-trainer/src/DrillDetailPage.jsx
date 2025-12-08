@@ -246,7 +246,7 @@ const DrillDetailPage = ({ drillId, onBack, sessions, setSessions, setShowModal,
         </div>
         <div className="flex flex-wrap gap-4 mt-4">
           <div className="flex items-center space-x-2 text-gray-300"><Clock className="w-5 h-5 text-emerald-400" /><span>{drill.duration}</span></div>
-          <div className="flex items-center space-x-2 text-gray-300"><Users className="w-5 h-5 text-blue-400" /><span>{drill.setup.players}</span></div>
+          <div className="flex items-center space-x-2 text-gray-300"><Users className="w-5 h-5 text-blue-400" /><span>{drill.setup?.players || 'N/A'}</span></div>
           <div className="flex items-center space-x-2 text-gray-300"><Target className="w-5 h-5 text-amber-400" /><span>{drill.category}</span></div>
         </div>
       </div>
@@ -261,38 +261,63 @@ const DrillDetailPage = ({ drillId, onBack, sessions, setSessions, setShowModal,
         <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
           <h2 className="text-xl font-bold text-white mb-4 flex items-center space-x-2"><Target className="w-5 h-5 text-emerald-400" /><span>Setup Requirements</span></h2>
           <div className="space-y-3">
-            <div className="flex justify-between py-2 border-b border-white/10"><span className="text-gray-400">Players</span><span className="text-white font-medium">{drill.setup.players}</span></div>
-            <div className="flex justify-between py-2 border-b border-white/10"><span className="text-gray-400">Area Size</span><span className="text-white font-medium">{drill.setup.area}</span></div>
-            <div className="flex justify-between py-2 border-b border-white/10"><span className="text-gray-400">Cones Needed</span><span className="text-white font-medium">{drill.setup.cones}</span></div>
-            <div className="flex justify-between py-2 border-b border-white/10"><span className="text-gray-400">Cone Spacing</span><span className="text-white font-medium">{drill.setup.coneSpacing}</span></div>
-            <div className="flex justify-between py-2"><span className="text-gray-400">Equipment</span><span className="text-white font-medium text-right max-w-[60%]">{drill.setup.equipment}</span></div>
+            <div className="flex justify-between py-2 border-b border-white/10"><span className="text-gray-400">Players</span><span className="text-white font-medium">{drill.setup?.players || 'N/A'}</span></div>
+            <div className="flex justify-between py-2 border-b border-white/10"><span className="text-gray-400">Area Size</span><span className="text-white font-medium">{drill.setup?.area || 'N/A'}</span></div>
+            <div className="flex justify-between py-2 border-b border-white/10"><span className="text-gray-400">Cones Needed</span><span className="text-white font-medium">{drill.setup?.cones || 'N/A'}</span></div>
+            <div className="flex justify-between py-2 border-b border-white/10"><span className="text-gray-400">Cone Spacing</span><span className="text-white font-medium">{drill.setup?.coneSpacing || 'N/A'}</span></div>
+            <div className="flex justify-between py-2"><span className="text-gray-400">Equipment</span><span className="text-white font-medium text-right max-w-[60%]">{drill.setup?.equipment || 'N/A'}</span></div>
           </div>
         </div>
         <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
           <h2 className="text-xl font-bold text-white mb-4 flex items-center space-x-2"><Lightbulb className="w-5 h-5 text-amber-400" /><span>What This Teaches</span></h2>
-          <div className="space-y-2">{drill.teaches.map((item, i) => (<div key={i} className="flex items-center space-x-3 py-2"><CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" /><span className="text-gray-300">{item}</span></div>))}</div>
+          <div className="space-y-2">
+            {(drill.teaches || []).map((item, i) => (
+              <div key={i} className="flex items-center space-x-3 py-2"><CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" /><span className="text-gray-300">{item}</span></div>
+            ))}
+            {(!drill.teaches || drill.teaches.length === 0) && (
+              <p className="text-gray-500">No teaching points specified.</p>
+            )}
+          </div>
         </div>
       </div>
 
       <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
         <h2 className="text-xl font-bold text-white mb-4">Step-by-Step Instructions</h2>
-        <div className="space-y-4">{drill.steps.map((step, i) => (<div key={i} className="flex items-start space-x-4 p-4 bg-white/5 rounded-xl"><div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center flex-shrink-0"><span className="text-white font-bold">{i + 1}</span></div><p className="text-gray-300 pt-1">{step}</p></div>))}</div>
+        <div className="space-y-4">
+          {(drill.steps || []).map((step, i) => (
+            <div key={i} className="flex items-start space-x-4 p-4 bg-white/5 rounded-xl"><div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center flex-shrink-0"><span className="text-white font-bold">{i + 1}</span></div><p className="text-gray-300 pt-1">{step}</p></div>
+          ))}
+          {(!drill.steps || drill.steps.length === 0) && (
+            <p className="text-gray-500">No steps specified.</p>
+          )}
+        </div>
       </div>
 
       <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
         <h2 className="text-xl font-bold text-white mb-4 flex items-center space-x-2"><AlertCircle className="w-5 h-5 text-amber-400" /><span>Key Coaching Points</span></h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">{drill.keyPoints.map((point, i) => (<div key={i} className="flex items-center space-x-3 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl"><Zap className="w-5 h-5 text-amber-400 flex-shrink-0" /><span className="text-gray-300">{point}</span></div>))}</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {(drill.keyPoints || []).map((point, i) => (
+            <div key={i} className="flex items-center space-x-3 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl"><Zap className="w-5 h-5 text-amber-400 flex-shrink-0" /><span className="text-gray-300">{point}</span></div>
+          ))}
+          {(!drill.keyPoints || drill.keyPoints.length === 0) && (
+            <p className="text-gray-500">No coaching points specified.</p>
+          )}
+        </div>
       </div>
 
-      <div className="bg-gradient-to-r from-emerald-500/20 to-emerald-600/10 border border-emerald-500/30 rounded-2xl p-6">
-        <h2 className="text-xl font-bold text-white mb-3 flex items-center space-x-2"><span>💡</span><span>Pro Tip</span></h2>
-        <p className="text-gray-300 text-lg italic">"{drill.proTip}"</p>
-      </div>
+      {drill.proTip && (
+        <div className="bg-gradient-to-r from-emerald-500/20 to-emerald-600/10 border border-emerald-500/30 rounded-2xl p-6">
+          <h2 className="text-xl font-bold text-white mb-3 flex items-center space-x-2"><span>💡</span><span>Pro Tip</span></h2>
+          <p className="text-gray-300 text-lg italic">"{drill.proTip}"</p>
+        </div>
+      )}
 
-      <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-        <h2 className="text-xl font-bold text-white mb-4">Overview</h2>
-        <p className="text-gray-300 leading-relaxed">{drill.overview}</p>
-      </div>
+      {drill.overview && (
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+          <h2 className="text-xl font-bold text-white mb-4">Overview</h2>
+          <p className="text-gray-300 leading-relaxed">{drill.overview}</p>
+        </div>
+      )}
     </div>
   );
 };
