@@ -628,7 +628,6 @@ export default function PitchMindApp() {
 });
   const teams = [...new Map(players.filter(p => p.teamName).map(p => [p.teamName, { id: p.teamId || p.teamName, name: p.teamName }])).values()];
   const [players, setPlayers] = useState([]);
-  const [teams, setTeams] = useState([]);
   const [videos, setVideos] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [reports, setReports] = useState([]);
