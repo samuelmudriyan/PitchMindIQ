@@ -1,723 +1,483 @@
 import React, { useState, useEffect } from 'react';
-import { SUBSCRIPTION_TIERS } from './PaymentGate';
+import { SignIn, SignUp, useUser } from '@clerk/clerk-react';
+import logo from './assets/logo.png';
 
 // ============================================================================
 // PITCHMIND LANDING PAGE
-// Target: Passionate but inexperienced coaches
-// Key offer: Annual subscription = FREE tripod
+// Green theme matching dashboard, with Clerk auth
 // ============================================================================
 
-const LandingPage = ({ onGetStarted, onLogin }) => {
-  const [billingCycle, setBillingCycle] = useState('annual');
-  const [isLaunchPricing] = useState(true); // Toggle for launch pricing
-  const [scrollY, setScrollY] = useState(0);
+// Inline pricing data (no PaymentGate dependency)
+const PRICING_TIERS = [
+  {
+    id: 'base',
+    name: 'Base',
+    price: 10,
+    annualPrice: 100,
+    launchPrice: 5,
+    launchAnnualPrice: 50,
+    tagline: 'Perfect for getting started',
+    features: ['5 video analyses/month', 'Single player tracking', 'Basic drill library', 'Decision quiz', 'Performance scores'],
+    tripod: null,
+  },
+  {
+    id: 'pro',
+    name: 'Pro',
+    price: 20,
+    annualPrice: 200,
+    launchPrice: 10,
+    launchAnnualPrice: 100,
+    tagline: 'Most popular for serious players',
+    popular: true,
+    features: ['12 video analyses/month', 'Unlimited player tracking', 'Full drill library', 'Performance trends', 'Compare to pros', 'Priority processing'],
+    tripod: { annual: 'basic', description: 'FREE Basic Tripod Kit' },
+  },
+  {
+    id: 'elite',
+    name: 'Elite',
+    price: 30,
+    annualPrice: 300,
+    launchPrice: 15,
+    launchAnnualPrice: 150,
+    tagline: 'For dedicated development',
+    features: ['25 video analyses/month', 'Everything in Pro', 'Downloadable clips', 'Formation maker', 'Advanced analytics', 'PDF reports'],
+    tripod: { annual: 'standard', description: 'FREE 10ft Tripod + Mount' },
+  },
+  {
+    id: 'coach',
+    name: 'Coach',
+    price: 40,
+    annualPrice: 400,
+    launchPrice: 25,
+    launchAnnualPrice: 250,
+    tagline: 'Complete team management',
+    features: ['50 video analyses/month', 'Everything in Elite', 'Team dashboard', 'Roster (25 players)', 'Multi-player compare', 'Parent sharing portal'],
+    tripod: { annual: 'pro', description: 'FREE 13ft Pro Tripod' },
+  },
+];
 
+const LandingPage = () => {
+  const { isSignedIn } = useUser();
+  const [showAuth, setShowAuth] = useState(null); // 'signin' | 'signup' | null
+  const [billingCycle, setBillingCycle] = useState('monthly');
+  const [isLaunchPricing] = useState(true);
+
+  // Redirect if signed in (handled by App.jsx, but safety check)
   useEffect(() => {
-    const handleScroll = () => setScrollY(window.scrollY);
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+    if (isSignedIn) {
+      window.location.reload();
+    }
+  }, [isSignedIn]);
 
-  // Colors
-  const c = {
-    bg: '#0a0e17',
-    bgAlt: '#0f172a',
-    card: '#1e293b',
-    border: '#334155',
-    text: '#f1f5f9',
-    textMuted: '#94a3b8',
-    accent: '#f59e0b',
-    accentHover: '#fbbf24',
-    success: '#22c55e',
-    field: '#166534',
-  };
+  // Auth Modal
+  if (showAuth) {
+    return (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4">
+        <div className="relative bg-[#1a2332] rounded-2xl p-8 max-w-md w-full border border-white/10">
+          {/* Close button */}
+          <button
+            onClick={() => setShowAuth(null)}
+            className="absolute top-4 right-4 text-gray-400 hover:text-white text-2xl"
+          >
+            ×
+          </button>
 
-  const tiers = ['base', 'pro', 'elite', 'coach'].map(id => SUBSCRIPTION_TIERS[id]);
+          {/* Logo */}
+          <div className="text-center mb-6">
+            <div className="flex items-center justify-center space-x-2 mb-2">
+              <div className="w-10 h-10 bg-emerald-500 rounded-lg flex items-center justify-center">
+                <span className="text-white font-bold">PM</span>
+              </div>
+              <span className="text-2xl font-bold text-emerald-400">PitchMind</span>
+            </div>
+            <p className="text-gray-400">
+              {showAuth === 'signin' ? 'Welcome back!' : 'Create your free account'}
+            </p>
+          </div>
+
+          {/* Clerk Auth */}
+          {showAuth === 'signin' ? (
+            <SignIn
+              routing="hash"
+              appearance={{
+                elements: {
+                  rootBox: { width: '100%' },
+                  card: { background: 'transparent', boxShadow: 'none', border: 'none', padding: 0 },
+                  headerTitle: { display: 'none' },
+                  headerSubtitle: { display: 'none' },
+                  formFieldInput: {
+                    background: '#0f1419',
+                    border: '1px solid #2a3744',
+                    color: '#fff',
+                    borderRadius: '8px',
+                  },
+                  formButtonPrimary: {
+                    background: '#10b981',
+                    borderRadius: '8px',
+                  },
+                  footerActionLink: { color: '#10b981' },
+                  formFieldLabel: { color: '#9ca3af' },
+                  dividerLine: { background: '#2a3744' },
+                  dividerText: { color: '#9ca3af' },
+                  socialButtonsBlockButton: {
+                    background: '#0f1419',
+                    border: '1px solid #2a3744',
+                    color: '#fff',
+                  },
+                },
+              }}
+            />
+          ) : (
+            <SignUp
+              routing="hash"
+              appearance={{
+                elements: {
+                  rootBox: { width: '100%' },
+                  card: { background: 'transparent', boxShadow: 'none', border: 'none', padding: 0 },
+                  headerTitle: { display: 'none' },
+                  headerSubtitle: { display: 'none' },
+                  formFieldInput: {
+                    background: '#0f1419',
+                    border: '1px solid #2a3744',
+                    color: '#fff',
+                    borderRadius: '8px',
+                  },
+                  formButtonPrimary: {
+                    background: '#10b981',
+                    borderRadius: '8px',
+                  },
+                  footerActionLink: { color: '#10b981' },
+                  formFieldLabel: { color: '#9ca3af' },
+                  dividerLine: { background: '#2a3744' },
+                  dividerText: { color: '#9ca3af' },
+                  socialButtonsBlockButton: {
+                    background: '#0f1419',
+                    border: '1px solid #2a3744',
+                    color: '#fff',
+                  },
+                },
+              }}
+            />
+          )}
+
+          {/* Switch mode */}
+          <div className="text-center mt-4">
+            <span className="text-gray-400 text-sm">
+              {showAuth === 'signin' ? "Don't have an account? " : 'Already have an account? '}
+            </span>
+            <button
+              onClick={() => setShowAuth(showAuth === 'signin' ? 'signup' : 'signin')}
+              className="text-emerald-400 text-sm font-semibold hover:underline"
+            >
+              {showAuth === 'signin' ? 'Sign up' : 'Sign in'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ 
-      minHeight: '100vh', 
-      background: c.bg, 
-      color: c.text,
-      fontFamily: "'Outfit', 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif",
-      overflowX: 'hidden',
-    }}>
-      {/* Google Fonts */}
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=DM+Sans:wght@400;500;700&display=swap');
-        
-        @keyframes float {
-          0%, 100% { transform: translateY(0px) rotate(0deg); }
-          50% { transform: translateY(-20px) rotate(2deg); }
-        }
-        @keyframes pulse-glow {
-          0%, 100% { box-shadow: 0 0 20px rgba(245, 158, 11, 0.3); }
-          50% { box-shadow: 0 0 40px rgba(245, 158, 11, 0.6); }
-        }
-        @keyframes slide-up {
-          from { opacity: 0; transform: translateY(30px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .slide-up { animation: slide-up 0.6s ease-out forwards; }
-        .delay-1 { animation-delay: 0.1s; opacity: 0; }
-        .delay-2 { animation-delay: 0.2s; opacity: 0; }
-        .delay-3 { animation-delay: 0.3s; opacity: 0; }
-        .delay-4 { animation-delay: 0.4s; opacity: 0; }
-      `}</style>
-
+    <div className="min-h-screen bg-[#0f1419] text-white font-sans">
       {/* Navigation */}
-      <nav style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        zIndex: 100,
-        padding: '16px 32px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        background: scrollY > 50 ? 'rgba(10, 14, 23, 0.95)' : 'transparent',
-        backdropFilter: scrollY > 50 ? 'blur(20px)' : 'none',
-        borderBottom: scrollY > 50 ? `1px solid ${c.border}` : 'none',
-        transition: 'all 0.3s ease',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ fontSize: '32px' }}>⚽</span>
-          <span style={{ 
-            fontSize: '24px', 
-            fontWeight: '800',
-            background: `linear-gradient(135deg, ${c.accent}, ${c.accentHover})`,
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-          }}>
-            PitchMind
-          </span>
+      <nav className="flex items-center justify-between px-6 lg:px-12 py-4 border-b border-white/10">
+        <div className="flex items-center space-x-2">
+          <div className="w-9 h-9 bg-emerald-500 rounded-lg flex items-center justify-center">
+            <span className="text-white font-bold text-sm">PM</span>
+          </div>
+          <span className="text-xl font-bold text-emerald-400">PitchMind</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <button onClick={onLogin} style={{
-            padding: '10px 20px',
-            background: 'transparent',
-            border: 'none',
-            color: c.textMuted,
-            fontSize: '14px',
-            fontWeight: '500',
-            cursor: 'pointer',
-          }}>
+
+        <div className="hidden md:flex items-center space-x-8">
+          {['Features', 'How It Works', 'About', 'Pricing'].map(item => (
+            <a key={item} href={`#${item.toLowerCase().replace(/\s+/g, '-')}`} className="text-gray-400 hover:text-white text-sm font-medium transition-colors">
+              {item}
+            </a>
+          ))}
+        </div>
+
+        <div className="flex items-center space-x-4">
+          <button onClick={() => setShowAuth('signin')} className="text-white text-sm font-medium hover:text-emerald-400 transition-colors">
             Sign In
           </button>
-          <button onClick={onGetStarted} style={{
-            padding: '10px 24px',
-            background: `linear-gradient(135deg, ${c.accent}, ${c.accentHover})`,
-            border: 'none',
-            borderRadius: '8px',
-            color: '#000',
-            fontSize: '14px',
-            fontWeight: '600',
-            cursor: 'pointer',
-          }}>
+          <button onClick={() => setShowAuth('signup')} className="bg-emerald-500 hover:bg-emerald-400 text-black px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors">
             Get Started Free
           </button>
         </div>
       </nav>
 
       {/* Hero Section */}
-      <section style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '120px 32px 80px',
-        position: 'relative',
-        overflow: 'hidden',
-      }}>
-        {/* Background Elements */}
-        <div style={{
-          position: 'absolute',
-          top: '20%',
-          left: '10%',
-          width: '400px',
-          height: '400px',
-          background: `radial-gradient(circle, ${c.accent}15 0%, transparent 70%)`,
-          borderRadius: '50%',
-          filter: 'blur(60px)',
-          animation: 'float 8s ease-in-out infinite',
-        }} />
-        <div style={{
-          position: 'absolute',
-          bottom: '10%',
-          right: '15%',
-          width: '300px',
-          height: '300px',
-          background: `radial-gradient(circle, ${c.success}10 0%, transparent 70%)`,
-          borderRadius: '50%',
-          filter: 'blur(40px)',
-          animation: 'float 10s ease-in-out infinite reverse',
-        }} />
-
-        <div style={{ maxWidth: '1200px', textAlign: 'center', position: 'relative', zIndex: 1 }}>
-          {/* Launch Badge */}
-          {isLaunchPricing && (
-            <div className="slide-up" style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '8px 16px',
-              background: `${c.accent}22`,
-              border: `1px solid ${c.accent}44`,
-              borderRadius: '50px',
-              marginBottom: '24px',
-            }}>
-              <span style={{ fontSize: '14px' }}>🚀</span>
-              <span style={{ fontSize: '14px', color: c.accent, fontWeight: '600' }}>
-                Launch Pricing — 50% Off (Limited Time)
-              </span>
+      <section className="px-6 lg:px-12 py-16 lg:py-24">
+        <div className="max-w-7xl mx-auto flex flex-col lg:flex-row items-center justify-between gap-12">
+          {/* Left Content */}
+          <div className="flex-1 max-w-xl">
+            {/* Badge */}
+            <div className="inline-flex items-center space-x-2 bg-[#1a2332] border border-white/10 rounded-full px-4 py-2 mb-6">
+              <span>✨</span>
+              <span className="text-gray-400 text-sm">AI-Powered Soccer Analysis</span>
+              <span className="bg-emerald-500 text-black text-xs font-bold px-2 py-0.5 rounded">New</span>
             </div>
-          )}
 
-          {/* Main Headline */}
-          <h1 className="slide-up delay-1" style={{
-            fontSize: 'clamp(40px, 7vw, 72px)',
-            fontWeight: '900',
-            lineHeight: '1.1',
-            margin: '0 0 24px 0',
-            letterSpacing: '-0.02em',
-          }}>
-            Coach Like a Pro.
-            <br />
-            <span style={{
-              background: `linear-gradient(135deg, ${c.accent}, ${c.accentHover}, ${c.success})`,
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-            }}>
-              No Experience Required.
-            </span>
-          </h1>
+            {/* Headline */}
+            <h1 className="text-5xl lg:text-6xl font-extrabold leading-tight mb-6">
+              Train Your<br />
+              <span className="text-emerald-400">Soccer IQ</span><br />
+              Like The Pros
+            </h1>
 
-          {/* Subheadline */}
-          <p className="slide-up delay-2" style={{
-            fontSize: 'clamp(18px, 2.5vw, 24px)',
-            color: c.textMuted,
-            maxWidth: '700px',
-            margin: '0 auto 40px',
-            lineHeight: '1.6',
-          }}>
-            AI-powered video analysis that shows you exactly what to coach.
-            <br />
-            Upload game footage. Get tactical insights in minutes.
-          </p>
+            {/* Subheadline */}
+            <p className="text-gray-400 text-lg leading-relaxed mb-8">
+              Upload your game footage and let AI analyze every decision. Compare your choices to elite players and unlock your tactical potential.
+            </p>
 
-          {/* CTA Buttons */}
-          <div className="slide-up delay-3" style={{ display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button onClick={onGetStarted} style={{
-              padding: '18px 40px',
-              background: `linear-gradient(135deg, ${c.accent}, ${c.accentHover})`,
-              border: 'none',
-              borderRadius: '12px',
-              color: '#000',
-              fontSize: '18px',
-              fontWeight: '700',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              animation: 'pulse-glow 2s ease-in-out infinite',
-            }}>
-              Start Free Trial
-              <span style={{ fontSize: '20px' }}>→</span>
-            </button>
-            <button style={{
-              padding: '18px 40px',
-              background: 'transparent',
-              border: `2px solid ${c.border}`,
-              borderRadius: '12px',
-              color: c.text,
-              fontSize: '18px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-            }}>
-              <span style={{ fontSize: '20px' }}>▶</span>
-              Watch Demo
-            </button>
+            {/* CTA Buttons */}
+            <div className="flex flex-wrap gap-4 mb-10">
+              <button onClick={() => setShowAuth('signup')} className="flex items-center space-x-2 bg-emerald-500 hover:bg-emerald-400 text-black px-7 py-4 rounded-xl text-lg font-semibold transition-colors">
+                <span>Start Analyzing Free</span>
+                <span>→</span>
+              </button>
+              <button className="flex items-center space-x-2 border border-white/20 hover:border-white/40 text-white px-7 py-4 rounded-xl text-lg font-medium transition-colors">
+                <span>▷</span>
+                <span>Watch Demo</span>
+              </button>
+            </div>
+
+            {/* Social Proof */}
+            <div className="flex items-center space-x-4">
+              <div className="flex -space-x-2">
+                {['JM', 'KT', 'AS', 'RB', 'LC'].map((initials, i) => (
+                  <div key={i} className="w-9 h-9 rounded-full bg-[#232f3e] border-2 border-[#0f1419] flex items-center justify-center text-xs font-semibold text-gray-400">
+                    {initials}
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div className="text-amber-400 text-sm">★★★★★</div>
+                <div className="text-gray-400 text-sm">Trusted by <strong className="text-white">500+</strong> coaches & players</div>
+              </div>
+            </div>
           </div>
 
-          {/* Trust Indicators */}
-          <div className="slide-up delay-4" style={{
-            display: 'flex',
-            justifyContent: 'center',
-            gap: '40px',
-            marginTop: '60px',
-            flexWrap: 'wrap',
-          }}>
-            {[
-              { value: '500+', label: 'Coaches' },
-              { value: '10K+', label: 'Videos Analyzed' },
-              { value: '4.9★', label: 'Rating' },
-            ].map((stat, i) => (
-              <div key={i} style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '28px', fontWeight: '800', color: c.accent }}>{stat.value}</div>
-                <div style={{ fontSize: '14px', color: c.textMuted }}>{stat.label}</div>
+          {/* Right Content - Demo Card */}
+          <div className="flex-1 max-w-lg relative">
+            {/* AI Badge */}
+            <div className="absolute -top-3 -right-3 bg-emerald-500 text-black px-4 py-2 rounded-lg text-sm font-semibold flex items-center space-x-1 z-10">
+              <span>✦</span>
+              <span>AI Powered</span>
+            </div>
+
+            <div className="bg-[#1a2332] rounded-2xl border border-white/10 overflow-hidden">
+              {/* Video Preview */}
+              <div className="bg-[#232f3e] h-60 flex items-center justify-center relative">
+                <div className="w-16 h-16 rounded-full bg-white/10 border-2 border-white/30 flex items-center justify-center">
+                  <span className="text-3xl ml-1">▷</span>
+                </div>
+                <div className="absolute bottom-4 text-gray-400 text-sm">AI Analysis Demo</div>
               </div>
-            ))}
+
+              {/* Analysis Result */}
+              <div className="p-4">
+                <div className="flex items-center justify-between bg-[#0f1419] rounded-xl p-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                      <span className="text-emerald-400 text-lg">◎</span>
+                    </div>
+                    <div>
+                      <div className="font-semibold">Decision Analyzed</div>
+                      <div className="text-emerald-400 text-sm">Optimal: Through ball to striker</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-3xl font-bold text-emerald-400">92</div>
+                    <div className="text-gray-500 text-xs">IQ Score</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Track Player Button */}
+              <div className="px-4 pb-4 flex justify-center">
+                <div className="inline-flex items-center space-x-2 bg-[#232f3e] rounded-full px-5 py-2.5 text-gray-400 text-sm">
+                  <span className="text-emerald-400">◉</span>
+                  <span>Track Any Player</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Problem/Solution Section */}
-      <section style={{
-        padding: '100px 32px',
-        background: c.bgAlt,
-      }}>
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: '60px' }}>
-            <h2 style={{ fontSize: '42px', fontWeight: '800', margin: '0 0 16px 0' }}>
-              You Know Soccer. Now <span style={{ color: c.accent }}>See It.</span>
-            </h2>
-            <p style={{ fontSize: '18px', color: c.textMuted, maxWidth: '600px', margin: '0 auto' }}>
-              You've watched a thousand games. But do you see what De Bruyne sees? PitchMind shows you.
-            </p>
-          </div>
-
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))',
-            gap: '32px',
-          }}>
-            {/* Before Card */}
-            <div style={{
-              padding: '40px',
-              background: '#1a1a2e',
-              borderRadius: '20px',
-              border: `1px solid #ef444433`,
-            }}>
-              <div style={{ fontSize: '48px', marginBottom: '20px' }}>😓</div>
-              <h3 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 16px 0', color: '#ef4444' }}>
-                Without PitchMind
-              </h3>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                {[
-                  'Spend hours rewatching game footage',
-                  '"I know something\'s wrong but can\'t explain it"',
-                  'Kids repeat the same mistakes every game',
-                  'Parents ask why Johnny isn\'t improving',
-                  'Feel like a volunteer, not a coach',
-                ].map((item, i) => (
-                  <li key={i} style={{
-                    padding: '12px 0',
-                    borderBottom: i < 4 ? `1px solid ${c.border}` : 'none',
-                    color: c.textMuted,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '12px',
-                  }}>
-                    <span style={{ color: '#ef4444' }}>✗</span>
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* After Card */}
-            <div style={{
-              padding: '40px',
-              background: `linear-gradient(135deg, ${c.field}22 0%, ${c.success}11 100%)`,
-              borderRadius: '20px',
-              border: `1px solid ${c.success}33`,
-            }}>
-              <div style={{ fontSize: '48px', marginBottom: '20px' }}>🏆</div>
-              <h3 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 16px 0', color: c.success }}>
-                With PitchMind
-              </h3>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                {[
-                  'AI analyzes footage in minutes, not hours',
-                  '"Sarah, you had 3 passing options here"',
-                  'Players learn WHY, not just what',
-                  'Show parents real improvement data',
-                  'Coach with confidence and credibility',
-                ].map((item, i) => (
-                  <li key={i} style={{
-                    padding: '12px 0',
-                    borderBottom: i < 4 ? `1px solid ${c.border}` : 'none',
-                    color: c.text,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '12px',
-                  }}>
-                    <span style={{ color: c.success }}>✓</span>
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
+      {/* Trusted By */}
+      <section className="border-t border-white/10 py-10 px-6">
+        <div className="max-w-4xl mx-auto text-center">
+          <p className="text-gray-500 text-sm mb-6">Trusted by coaches from</p>
+          <div className="flex flex-wrap justify-center gap-8">
+            {['Premier League', 'La Liga', 'MLS', 'Youth Academies'].map(league => (
+              <span key={league} className="text-gray-400 font-medium">{league}</span>
+            ))}
           </div>
         </div>
       </section>
 
       {/* How It Works */}
-      <section style={{ padding: '100px 32px', background: c.bg }}>
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: '60px' }}>
-            <h2 style={{ fontSize: '42px', fontWeight: '800', margin: '0 0 16px 0' }}>
-              Three Steps to <span style={{ color: c.accent }}>Better Coaching</span>
-            </h2>
+      <section id="how-it-works" className="py-20 px-6">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl font-bold mb-4">How It Works</h2>
+            <p className="text-gray-400 text-lg">Three simple steps to better coaching</p>
           </div>
 
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-            gap: '40px',
-          }}>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[
-              { step: '1', icon: '📱', title: 'Record the Game', desc: 'Set up your phone on a tripod at midfield. Press record. That\'s it.' },
-              { step: '2', icon: '🤖', title: 'AI Does the Work', desc: 'Upload the video. Our AI tracks every player, every pass, every decision.' },
-              { step: '3', icon: '📊', title: 'Coach with Clarity', desc: 'Get specific insights: "At 23:15, Marcus had 3 options. He chose the worst one."' },
+              { step: '1', icon: '📱', title: 'Record Your Game', desc: "Set up your phone on a tripod at midfield. We'll send you one free with annual plans!" },
+              { step: '2', icon: '🤖', title: 'AI Analyzes Everything', desc: 'Our AI tracks every player, identifies key moments, and evaluates every decision made.' },
+              { step: '3', icon: '📈', title: 'Get Actionable Insights', desc: 'Receive specific coaching points, compare to pro players, and track improvement over time.' },
             ].map((item, i) => (
-              <div key={i} style={{
-                padding: '40px',
-                background: c.card,
-                borderRadius: '20px',
-                border: `1px solid ${c.border}`,
-                textAlign: 'center',
-                position: 'relative',
-              }}>
-                <div style={{
-                  position: 'absolute',
-                  top: '-20px',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  width: '40px',
-                  height: '40px',
-                  background: `linear-gradient(135deg, ${c.accent}, ${c.accentHover})`,
-                  borderRadius: '50%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: '800',
-                  color: '#000',
-                }}>
+              <div key={i} className="bg-[#1a2332] rounded-2xl p-8 border border-white/10 text-center relative">
+                <div className="absolute -top-4 left-1/2 -translate-x-1/2 w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center text-black font-bold text-sm">
                   {item.step}
                 </div>
-                <div style={{ fontSize: '56px', marginBottom: '20px', marginTop: '10px' }}>{item.icon}</div>
-                <h3 style={{ fontSize: '22px', fontWeight: '700', margin: '0 0 12px 0' }}>{item.title}</h3>
-                <p style={{ fontSize: '16px', color: c.textMuted, margin: 0, lineHeight: '1.6' }}>{item.desc}</p>
+                <div className="text-5xl mb-4 mt-2">{item.icon}</div>
+                <h3 className="text-xl font-bold mb-3">{item.title}</h3>
+                <p className="text-gray-400 leading-relaxed">{item.desc}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Tripod Offer Section */}
-      <section style={{
-        padding: '100px 32px',
-        background: `linear-gradient(135deg, ${c.accent}15 0%, ${c.bgAlt} 50%, ${c.success}10 100%)`,
-      }}>
-        <div style={{ maxWidth: '1000px', margin: '0 auto', textAlign: 'center' }}>
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '8px 16px',
-            background: `${c.success}22`,
-            border: `1px solid ${c.success}44`,
-            borderRadius: '50px',
-            marginBottom: '24px',
-          }}>
-            <span style={{ fontSize: '14px' }}>🎁</span>
-            <span style={{ fontSize: '14px', color: c.success, fontWeight: '600' }}>
-              Annual Subscribers Only
-            </span>
+      {/* Tripod Offer */}
+      <section className="bg-[#1a2332] border-y border-white/10 py-16 px-6">
+        <div className="max-w-3xl mx-auto text-center">
+          <div className="inline-flex items-center space-x-2 bg-emerald-500/20 px-4 py-2 rounded-full mb-6">
+            <span>🎁</span>
+            <span className="text-emerald-400 font-semibold text-sm">Annual Subscriber Bonus</span>
           </div>
-
-          <h2 style={{ fontSize: '48px', fontWeight: '800', margin: '0 0 20px 0' }}>
-            We'll Send You a <span style={{ color: c.accent }}>Free Tripod</span>
+          <h2 className="text-4xl font-bold mb-4">
+            We'll Send You a <span className="text-emerald-400">Free Tripod</span>
           </h2>
-          <p style={{ fontSize: '20px', color: c.textMuted, maxWidth: '700px', margin: '0 auto 40px', lineHeight: '1.6' }}>
-            The #1 problem with game footage? Shaky, low-angle video that's impossible to analyze.
-            <br /><strong style={{ color: c.text }}>We solve that by shipping you the right equipment.</strong>
-          </p>
-
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: '24px',
-            marginBottom: '40px',
-          }}>
-            {[
-              { tier: 'Pro Annual', tripod: 'Basic Tripod Kit', value: '$30', icon: '📷' },
-              { tier: 'Elite Annual', tripod: '10ft Tripod + Mount', value: '$100', icon: '📹' },
-              { tier: 'Coach Annual', tripod: '13ft Pro Tripod + Case', value: '$180', icon: '🎬' },
-            ].map((item, i) => (
-              <div key={i} style={{
-                padding: '24px',
-                background: c.card,
-                borderRadius: '16px',
-                border: `1px solid ${c.border}`,
-              }}>
-                <div style={{ fontSize: '40px', marginBottom: '12px' }}>{item.icon}</div>
-                <div style={{ fontSize: '14px', color: c.textMuted, marginBottom: '4px' }}>{item.tier}</div>
-                <div style={{ fontSize: '18px', fontWeight: '700', marginBottom: '4px' }}>{item.tripod}</div>
-                <div style={{ fontSize: '14px', color: c.success }}>FREE (${item.value} value)</div>
-              </div>
-            ))}
-          </div>
-
-          <p style={{ fontSize: '14px', color: c.textMuted }}>
-            Tripod ships within 5-7 business days of subscription confirmation.
+          <p className="text-gray-400 text-lg max-w-xl mx-auto">
+            Good footage = better analysis. Sign up for an annual plan and we'll ship you professional filming equipment at no extra cost.
           </p>
         </div>
       </section>
 
-      {/* Pricing Section */}
-      <section id="pricing" style={{ padding: '100px 32px', background: c.bg }}>
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: '40px' }}>
-            <h2 style={{ fontSize: '42px', fontWeight: '800', margin: '0 0 16px 0' }}>
-              Simple, <span style={{ color: c.accent }}>Affordable</span> Pricing
-            </h2>
-            <p style={{ fontSize: '18px', color: c.textMuted, marginBottom: '24px' }}>
-              Start free. Upgrade when you're ready.
-            </p>
+      {/* Pricing */}
+      <section id="pricing" className="py-20 px-6">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-4xl font-bold mb-4">Simple, Transparent Pricing</h2>
+            <p className="text-gray-400 text-lg mb-6">Start free. Upgrade when you're ready.</p>
 
             {/* Billing Toggle */}
-            <div style={{
-              display: 'inline-flex',
-              background: c.card,
-              borderRadius: '12px',
-              padding: '4px',
-              border: `1px solid ${c.border}`,
-            }}>
+            <div className="inline-flex bg-[#1a2332] rounded-xl p-1 border border-white/10">
               {['monthly', 'annual'].map(cycle => (
                 <button
                   key={cycle}
                   onClick={() => setBillingCycle(cycle)}
-                  style={{
-                    padding: '10px 24px',
-                    background: billingCycle === cycle ? c.accent : 'transparent',
-                    border: 'none',
-                    borderRadius: '8px',
-                    color: billingCycle === cycle ? '#000' : c.textMuted,
-                    fontWeight: '600',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                  }}
+                  className={`px-6 py-2.5 rounded-lg text-sm font-semibold transition-colors flex items-center space-x-2 ${
+                    billingCycle === cycle ? 'bg-emerald-500 text-black' : 'text-gray-400 hover:text-white'
+                  }`}
                 >
-                  {cycle === 'monthly' ? 'Monthly' : 'Annual'}
-                  {cycle === 'annual' && <span style={{
-                    padding: '2px 8px',
-                    background: billingCycle === 'annual' ? '#000' : c.success,
-                    borderRadius: '4px',
-                    fontSize: '11px',
-                    color: billingCycle === 'annual' ? c.accent : '#fff',
-                  }}>
-                    + FREE Tripod
-                  </span>}
+                  <span>{cycle.charAt(0).toUpperCase() + cycle.slice(1)}</span>
+                  {cycle === 'annual' && (
+                    <span className={`text-xs px-2 py-0.5 rounded ${billingCycle === 'annual' ? 'bg-black text-emerald-400' : 'bg-emerald-500 text-black'}`}>
+                      +TRIPOD
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
           </div>
 
           {/* Pricing Cards */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-            gap: '24px',
-          }}>
-            {tiers.map(tier => {
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {PRICING_TIERS.map(tier => {
               const price = billingCycle === 'annual'
                 ? (isLaunchPricing ? tier.launchAnnualPrice : tier.annualPrice)
                 : (isLaunchPricing ? tier.launchPrice : tier.price);
               const originalPrice = billingCycle === 'annual' ? tier.annualPrice : tier.price;
-              const isPopular = tier.popular;
 
               return (
-                <div key={tier.id} style={{
-                  padding: '32px',
-                  background: isPopular ? `linear-gradient(135deg, ${c.card} 0%, ${c.accent}11 100%)` : c.card,
-                  borderRadius: '20px',
-                  border: isPopular ? `2px solid ${c.accent}` : `1px solid ${c.border}`,
-                  position: 'relative',
-                  transform: isPopular ? 'scale(1.02)' : 'scale(1)',
-                }}>
-                  {isPopular && (
-                    <div style={{
-                      position: 'absolute',
-                      top: '-12px',
-                      left: '50%',
-                      transform: 'translateX(-50%)',
-                      padding: '6px 16px',
-                      background: c.accent,
-                      borderRadius: '20px',
-                      fontSize: '12px',
-                      fontWeight: '700',
-                      color: '#000',
-                    }}>
-                      ⭐ MOST POPULAR
+                <div
+                  key={tier.id}
+                  className={`bg-[#1a2332] rounded-2xl p-6 border relative ${
+                    tier.popular ? 'border-emerald-500 ring-1 ring-emerald-500/50' : 'border-white/10'
+                  }`}
+                >
+                  {tier.popular && (
+                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-500 text-black text-xs font-bold px-3 py-1 rounded-full">
+                      MOST POPULAR
                     </div>
                   )}
 
-                  <h3 style={{ fontSize: '24px', fontWeight: '700', margin: '0 0 4px 0' }}>{tier.name}</h3>
-                  <p style={{ fontSize: '14px', color: c.textMuted, margin: '0 0 20px 0' }}>{tier.tagline}</p>
+                  <h3 className="text-2xl font-bold mb-1">{tier.name}</h3>
+                  <p className="text-gray-400 text-sm mb-4">{tier.tagline}</p>
 
-                  <div style={{ marginBottom: '20px' }}>
+                  <div className="mb-4">
                     {isLaunchPricing && (
-                      <span style={{
-                        fontSize: '18px',
-                        color: c.textMuted,
-                        textDecoration: 'line-through',
-                        marginRight: '8px',
-                      }}>
-                        ${originalPrice}
-                      </span>
+                      <span className="text-gray-500 line-through text-lg mr-2">${originalPrice}</span>
                     )}
-                    <span style={{ fontSize: '48px', fontWeight: '800', color: c.accent }}>${price}</span>
-                    <span style={{ fontSize: '16px', color: c.textMuted }}>
-                      /{billingCycle === 'annual' ? 'year' : 'mo'}
-                    </span>
+                    <span className="text-4xl font-extrabold text-emerald-400">${price}</span>
+                    <span className="text-gray-400 text-sm">/{billingCycle === 'annual' ? 'year' : 'mo'}</span>
                   </div>
 
-                  {/* Tripod Badge */}
-                  {billingCycle === 'annual' && tier.tripod?.annual && tier.tripod.annual !== 'discount' && (
-                    <div style={{
-                      padding: '10px 12px',
-                      background: `${c.success}22`,
-                      borderRadius: '8px',
-                      marginBottom: '20px',
-                      border: `1px solid ${c.success}33`,
-                    }}>
-                      <span style={{ fontSize: '14px', color: c.success, fontWeight: '600' }}>
-                        🎁 {tier.tripod.description}
-                      </span>
+                  {billingCycle === 'annual' && tier.tripod && (
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3 mb-4">
+                      <span className="text-emerald-400 text-sm font-semibold">🎁 {tier.tripod.description}</span>
                     </div>
                   )}
 
-                  <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 24px 0' }}>
-                    {tier.features.map((f, i) => (
-                      <li key={i} style={{
-                        padding: '8px 0',
-                        fontSize: '14px',
-                        color: c.text,
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '10px',
-                      }}>
-                        <span style={{ color: c.success, flexShrink: 0 }}>✓</span>
-                        {f}
+                  <ul className="space-y-3 mb-6">
+                    {tier.features.map((feature, i) => (
+                      <li key={i} className="flex items-start space-x-2 text-gray-300 text-sm">
+                        <span className="text-emerald-400 mt-0.5">✓</span>
+                        <span>{feature}</span>
                       </li>
                     ))}
                   </ul>
 
-                  <button onClick={onGetStarted} style={{
-                    width: '100%',
-                    padding: '14px',
-                    background: isPopular ? `linear-gradient(135deg, ${c.accent}, ${c.accentHover})` : 'transparent',
-                    border: isPopular ? 'none' : `1px solid ${c.border}`,
-                    borderRadius: '10px',
-                    color: isPopular ? '#000' : c.text,
-                    fontSize: '15px',
-                    fontWeight: '600',
-                    cursor: 'pointer',
-                  }}>
-                    {isPopular ? 'Get Started' : 'Choose Plan'}
+                  <button
+                    onClick={() => setShowAuth('signup')}
+                    className={`w-full py-3 rounded-xl font-semibold transition-colors ${
+                      tier.popular
+                        ? 'bg-emerald-500 hover:bg-emerald-400 text-black'
+                        : 'border border-white/20 text-white hover:border-white/40'
+                    }`}
+                  >
+                    Get Started
                   </button>
                 </div>
               );
             })}
           </div>
 
-          <p style={{ textAlign: 'center', marginTop: '32px', fontSize: '14px', color: c.textMuted }}>
+          <p className="text-center text-gray-500 text-sm mt-8">
             All plans include a 7-day money-back guarantee. Cancel anytime.
           </p>
         </div>
       </section>
 
-      {/* Competitor Comparison */}
-      <section style={{ padding: '100px 32px', background: c.bgAlt }}>
-        <div style={{ maxWidth: '900px', margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: '40px' }}>
-            <h2 style={{ fontSize: '36px', fontWeight: '800', margin: '0 0 16px 0' }}>
-              Why Coaches Choose <span style={{ color: c.accent }}>PitchMind</span>
-            </h2>
-          </div>
-
-          <div style={{
-            background: c.card,
-            borderRadius: '16px',
-            overflow: 'hidden',
-            border: `1px solid ${c.border}`,
-          }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: c.bgAlt }}>
-                  <th style={{ padding: '16px 20px', textAlign: 'left', fontWeight: '600', color: c.textMuted }}>Feature</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'center', fontWeight: '700', color: c.accent }}>PitchMind</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'center', fontWeight: '600', color: c.textMuted }}>Hudl</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'center', fontWeight: '600', color: c.textMuted }}>Veo</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[
-                  { feature: 'Starting Price', pitchmind: '$10/mo', hudl: '$150/mo', veo: '$2,000 + $100/mo' },
-                  { feature: 'AI Tactical Analysis', pitchmind: '✓', hudl: '✗', veo: 'Basic' },
-                  { feature: 'Decision Training Quiz', pitchmind: '✓', hudl: '✗', veo: '✗' },
-                  { feature: 'Compare to Pro Players', pitchmind: '✓', hudl: '✗', veo: '✗' },
-                  { feature: 'Hardware Required', pitchmind: 'Your Phone', hudl: 'Your Phone', veo: '$2,000 Camera' },
-                  { feature: 'Free Tripod', pitchmind: '✓ (Annual)', hudl: '✗', veo: '✗' },
-                  { feature: 'Setup Time', pitchmind: '5 min', hudl: '30 min', veo: '30 min' },
-                ].map((row, i) => (
-                  <tr key={i} style={{ borderTop: `1px solid ${c.border}` }}>
-                    <td style={{ padding: '14px 20px', fontWeight: '500' }}>{row.feature}</td>
-                    <td style={{ padding: '14px 20px', textAlign: 'center', color: row.pitchmind.includes('✓') ? c.success : c.accent, fontWeight: '600' }}>{row.pitchmind}</td>
-                    <td style={{ padding: '14px 20px', textAlign: 'center', color: row.hudl === '✗' ? '#ef4444' : c.textMuted }}>{row.hudl}</td>
-                    <td style={{ padding: '14px 20px', textAlign: 'center', color: row.veo === '✗' ? '#ef4444' : c.textMuted }}>{row.veo}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
       {/* Testimonials */}
-      <section style={{ padding: '100px 32px', background: c.bg }}>
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: '60px' }}>
-            <h2 style={{ fontSize: '42px', fontWeight: '800', margin: 0 }}>
-              Coaches <span style={{ color: c.accent }}>Love</span> PitchMind
-            </h2>
-          </div>
+      <section className="py-20 px-6 bg-[#0f1419]">
+        <div className="max-w-6xl mx-auto">
+          <h2 className="text-4xl font-bold text-center mb-12">
+            Coaches <span className="text-emerald-400">Love</span> PitchMind
+          </h2>
 
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))',
-            gap: '24px',
-          }}>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {[
               { quote: "I've been coaching rec league for 5 years. PitchMind made me feel like I finally know what I'm doing.", name: 'Mike R.', role: 'U12 Coach, Ohio', avatar: '👨‍🦰' },
               { quote: "My son's travel team improved so much after I started using this. The decision quiz is genius.", name: 'Jennifer T.', role: 'U10 Parent & Assistant Coach', avatar: '👩' },
               { quote: "Worth every penny. I used to spend Sunday nights watching game tape. Now AI does it in 10 minutes.", name: 'David K.', role: 'Club Coach, Texas', avatar: '👨' },
             ].map((t, i) => (
-              <div key={i} style={{
-                padding: '32px',
-                background: c.card,
-                borderRadius: '16px',
-                border: `1px solid ${c.border}`,
-              }}>
-                <div style={{ display: 'flex', marginBottom: '16px' }}>
-                  {[1,2,3,4,5].map(s => <span key={s} style={{ color: c.accent, fontSize: '20px' }}>★</span>)}
-                </div>
-                <p style={{ fontSize: '16px', color: c.text, lineHeight: '1.7', margin: '0 0 24px 0', fontStyle: 'italic' }}>
-                  "{t.quote}"
-                </p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ fontSize: '36px' }}>{t.avatar}</div>
+              <div key={i} className="bg-[#1a2332] rounded-2xl p-6 border border-white/10">
+                <div className="text-amber-400 mb-4">★★★★★</div>
+                <p className="text-gray-300 leading-relaxed mb-6 italic">"{t.quote}"</p>
+                <div className="flex items-center space-x-3">
+                  <div className="text-3xl">{t.avatar}</div>
                   <div>
-                    <div style={{ fontWeight: '600' }}>{t.name}</div>
-                    <div style={{ fontSize: '14px', color: c.textMuted }}>{t.role}</div>
+                    <div className="font-semibold">{t.name}</div>
+                    <div className="text-gray-500 text-sm">{t.role}</div>
                   </div>
                 </div>
               </div>
@@ -727,72 +487,36 @@ const LandingPage = ({ onGetStarted, onLogin }) => {
       </section>
 
       {/* Final CTA */}
-      <section style={{
-        padding: '100px 32px',
-        background: `linear-gradient(135deg, ${c.accent}22 0%, ${c.bg} 50%, ${c.success}11 100%)`,
-        textAlign: 'center',
-      }}>
-        <div style={{ maxWidth: '700px', margin: '0 auto' }}>
-          <h2 style={{ fontSize: '48px', fontWeight: '800', margin: '0 0 20px 0' }}>
-            Ready to Coach<br /><span style={{ color: c.accent }}>Like You Mean It?</span>
+      <section className="py-20 px-6 text-center">
+        <div className="max-w-2xl mx-auto">
+          <h2 className="text-4xl lg:text-5xl font-bold mb-6">
+            Ready to Coach<br /><span className="text-emerald-400">Like You Mean It?</span>
           </h2>
-          <p style={{ fontSize: '20px', color: c.textMuted, marginBottom: '40px' }}>
-            Start with a free trial. No credit card required.
-          </p>
-          <button onClick={onGetStarted} style={{
-            padding: '20px 48px',
-            background: `linear-gradient(135deg, ${c.accent}, ${c.accentHover})`,
-            border: 'none',
-            borderRadius: '14px',
-            color: '#000',
-            fontSize: '20px',
-            fontWeight: '700',
-            cursor: 'pointer',
-            animation: 'pulse-glow 2s ease-in-out infinite',
-          }}>
+          <p className="text-gray-400 text-lg mb-8">Start with a free trial. No credit card required.</p>
+          <button
+            onClick={() => setShowAuth('signup')}
+            className="bg-emerald-500 hover:bg-emerald-400 text-black px-10 py-4 rounded-xl text-lg font-bold transition-colors"
+          >
             Get Started Free →
           </button>
-          <p style={{ fontSize: '14px', color: c.textMuted, marginTop: '20px' }}>
-            Join 500+ coaches already improving their game
-          </p>
+          <p className="text-gray-500 text-sm mt-4">Join 500+ coaches already improving their game</p>
         </div>
       </section>
 
       {/* Footer */}
-      <footer style={{
-        padding: '60px 32px 40px',
-        background: c.bgAlt,
-        borderTop: `1px solid ${c.border}`,
-      }}>
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '24px',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <span style={{ fontSize: '28px' }}>⚽</span>
-              <span style={{ fontSize: '20px', fontWeight: '700', color: c.accent }}>PitchMind</span>
+      <footer className="border-t border-white/10 py-10 px-6">
+        <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
+          <div className="flex items-center space-x-2">
+            <div className="w-7 h-7 bg-emerald-500 rounded-md flex items-center justify-center">
+              <span className="text-white font-bold text-xs">PM</span>
             </div>
-            <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap' }}>
-              {['Privacy', 'Terms', 'Support', 'Contact'].map(link => (
-                <a key={link} href="#" style={{ color: c.textMuted, textDecoration: 'none', fontSize: '14px' }}>
-                  {link}
-                </a>
-              ))}
-            </div>
+            <span className="text-lg font-semibold text-emerald-400">PitchMind</span>
           </div>
-          <div style={{
-            marginTop: '40px',
-            paddingTop: '24px',
-            borderTop: `1px solid ${c.border}`,
-            textAlign: 'center',
-            color: c.textMuted,
-            fontSize: '14px',
-          }}>
-            © 2025 PitchMind. All rights reserved.
+          <div className="text-gray-500 text-sm">© 2025 PitchMind. All rights reserved.</div>
+          <div className="flex space-x-6">
+            {['Privacy', 'Terms', 'Support'].map(link => (
+              <a key={link} href="#" className="text-gray-500 hover:text-white text-sm transition-colors">{link}</a>
+            ))}
           </div>
         </div>
       </footer>
