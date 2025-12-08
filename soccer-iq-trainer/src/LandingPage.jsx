@@ -139,7 +139,7 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn, logoUrl 
         top: 0,
         left: 0,
         right: 0,
-        zIndex: 100,
+        zIndex: 1000,
         padding: '0 48px',
         height: '72px',
         display: 'flex',
@@ -248,29 +248,40 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn, logoUrl 
         </div>
 
         {/* Auth Buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', zIndex: 999 }}>
           <button
             type="button"
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              console.log('Sign In clicked, onLogin exists:', !!onLogin);
+              console.log('=== SIGN IN BUTTON CLICKED ===');
+              console.log('onLogin type:', typeof onLogin);
               if (typeof onLogin === 'function') {
                 onLogin();
               } else {
-                console.error('onLogin is not a function!');
+                alert('Sign In handler not connected. Please refresh the page.');
               }
             }}
             style={{
-              background: 'none',
-              border: 'none',
+              background: 'transparent',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: '8px',
               color: '#e2e8f0',
               fontSize: '14px',
               fontWeight: '500',
               cursor: 'pointer',
-              padding: '10px 16px',
-              zIndex: 10,
+              padding: '10px 20px',
+              zIndex: 999,
               position: 'relative',
+              transition: 'all 0.2s',
+            }}
+            onMouseOver={e => {
+              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)';
+            }}
+            onMouseOut={e => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)';
             }}
           >
             Sign In
@@ -280,11 +291,12 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn, logoUrl 
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              console.log('Get Started clicked, onGetStarted exists:', !!onGetStarted);
+              console.log('=== GET STARTED BUTTON CLICKED ===');
+              console.log('onGetStarted type:', typeof onGetStarted);
               if (typeof onGetStarted === 'function') {
                 onGetStarted();
               } else {
-                console.error('onGetStarted is not a function!');
+                alert('Get Started handler not connected. Please refresh the page.');
               }
             }}
             style={{
@@ -295,13 +307,20 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn, logoUrl 
               fontSize: '14px',
               fontWeight: '600',
               cursor: 'pointer',
-              padding: '10px 20px',
+              padding: '10px 24px',
               transition: 'all 0.2s',
-              zIndex: 10,
+              zIndex: 999,
               position: 'relative',
+              boxShadow: '0 2px 10px rgba(16, 185, 129, 0.3)',
             }}
-            onMouseOver={e => e.target.style.background = '#059669'}
-            onMouseOut={e => e.target.style.background = '#10b981'}
+            onMouseOver={e => {
+              e.currentTarget.style.background = '#059669';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+            }}
+            onMouseOut={e => {
+              e.currentTarget.style.background = '#10b981';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
           >
             Get Started
           </button>
@@ -1304,20 +1323,20 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn, logoUrl 
                   fontSize: '40px',
                   flexShrink: 0,
                 }}>
-                  👤
+                  ⚽
                 </div>
                 <div>
                   <h3 style={{ fontSize: '24px', fontWeight: '700', color: '#f1f5f9', marginBottom: '4px' }}>
-                    The Founder
+                    Samuel Mudriyan
                   </h3>
                   <p style={{ color: '#10b981', fontSize: '14px', fontWeight: '500', marginBottom: '12px' }}>
-                    Founder & CEO
+                    Founder & Developer
                   </p>
                   <p style={{ color: '#94a3b8', fontSize: '14px', lineHeight: '1.7' }}>
-                    A passionate soccer coach and software developer who saw a gap in how youth coaches 
-                    access professional-level tactical tools. After years of coaching recreational and 
-                    travel teams, the frustration of not having affordable video analysis tools led to 
-                    building PitchMind.
+                    Engineering student at Boise State University with a passion for soccer and technology. 
+                    After years of playing and coaching, I saw how youth coaches lacked access to the same 
+                    video analysis tools that professional teams use. PitchMind was born from a simple idea: 
+                    every coach deserves AI-powered insights, not just the ones with big budgets.
                   </p>
                 </div>
               </div>
@@ -1336,7 +1355,7 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn, logoUrl 
                   <span style={{ color: '#10b981' }}>📖</span> The Story
                 </h3>
                 <p style={{ color: '#94a3b8', fontSize: '14px', lineHeight: '1.8', marginBottom: '16px' }}>
-                  PitchMind started in 2024 as a simple question: "Why do professional teams have AI 
+                  PitchMind started in 2024 with a simple question: "Why do professional teams have AI 
                   video analysis while youth coaches have nothing?"
                 </p>
                 <p style={{ color: '#94a3b8', fontSize: '14px', lineHeight: '1.8', marginBottom: '16px' }}>
