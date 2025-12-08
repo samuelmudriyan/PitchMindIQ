@@ -1,10 +1,12 @@
-import React from 'react';
-import { ArrowLeft, Clock, Users, Target, Lightbulb, CheckCircle, Zap, AlertCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowLeft, Clock, Users, Target, Lightbulb, CheckCircle, Zap, AlertCircle, Eye, Grid3X3 } from 'lucide-react';
 import { drillsData } from './DrillData';
 
 // Jersey Icon - like real formation charts
 const Jersey = ({ x, y, number, color = '#10b981', size = 32 }) => (
   <g transform={`translate(${x - size/2}, ${y - size/2})`}>
+    {/* Shadow */}
+    <ellipse cx={size/2} cy={size + 2} rx={size/3} ry={3} fill="rgba(0,0,0,0.3)" />
     <path d={`M${size*0.2},${size*0.15} L${size*0.35},0 L${size*0.65},0 L${size*0.8},${size*0.15} L${size*0.95},${size*0.25} L${size*0.85},${size*0.35} L${size*0.75},${size*0.3} L${size*0.75},${size} L${size*0.25},${size} L${size*0.25},${size*0.3} L${size*0.15},${size*0.35} L${size*0.05},${size*0.25} Z`} fill={color} stroke="#fff" strokeWidth="2" />
     <text x={size/2} y={size*0.72} textAnchor="middle" fontSize={size*0.38} fill="#fff" fontWeight="bold" fontFamily="Arial">{number}</text>
   </g>
@@ -212,110 +214,463 @@ const Legend = () => (
   </div>
 );
 
-const DrillDetailPage = ({ drillId, onBack, sessions, setSessions, setShowModal, setSelectedDrill }) => {
-  const drill = drillsData.find(d => d.id === drillId);
-  const DrillVisual = DrillVisuals[drillId];
+// Generate dynamic drill visualization based on drill type
+const DynamicDrillVisual = ({ drill, viewMode = '2d' }) => {
+  const category = (drill.category || drill.type || '').toLowerCase();
+  const playerCount = parseInt(drill.players) || 6;
   
-  if (!drill) return <div className="text-center py-20"><p className="text-gray-400">Drill not found</p><button onClick={onBack} className="mt-4 text-emerald-400 hover:underline">Go back</button></div>;
+  // Get player positions based on drill type
+  const getPlayerPositions = () => {
+    if (category.includes('rondo') || category.includes('possession')) {
+      // Circle/square formation for rondos
+      const positions = [];
+      const centerX = 350, centerY = 225, radius = 120;
+      const attackers = Math.min(playerCount - 1, 6);
+      const defenders = Math.max(1, playerCount - attackers);
+      
+      // Attackers around the outside
+      for (let i = 0; i < attackers; i++) {
+        const angle = (i / attackers) * Math.PI * 2 - Math.PI / 2;
+        positions.push({
+          x: centerX + Math.cos(angle) * radius,
+          y: centerY + Math.sin(angle) * radius,
+          role: `A${i + 1}`,
+          color: '#10b981'
+        });
+      }
+      
+      // Defenders in middle
+      for (let i = 0; i < defenders; i++) {
+        positions.push({
+          x: centerX + (i - defenders/2 + 0.5) * 50,
+          y: centerY + (i % 2) * 40 - 20,
+          role: `D${i + 1}`,
+          color: '#ef4444'
+        });
+      }
+      return positions;
+    }
+    
+    if (category.includes('shoot') || category.includes('finish')) {
+      // Shooting drill - players around penalty area
+      return [
+        { x: 80, y: 225, role: 'GK', color: '#8b5cf6' },
+        { x: 300, y: 150, role: '1', color: '#10b981' },
+        { x: 300, y: 225, role: '2', color: '#10b981' },
+        { x: 300, y: 300, role: '3', color: '#10b981' },
+        { x: 450, y: 180, role: 'S', color: '#3b82f6' },
+        { x: 450, y: 270, role: 'S', color: '#3b82f6' },
+      ];
+    }
+    
+    if (category.includes('dribbl')) {
+      // Dribbling drill - cone course
+      return [
+        { x: 150, y: 225, role: '1', color: '#10b981' },
+        { x: 250, y: 225, role: '2', color: '#10b981' },
+        { x: 350, y: 225, role: '3', color: '#10b981' },
+      ];
+    }
+    
+    if (category.includes('defend')) {
+      // Defending drill - 1v1 channel
+      return [
+        { x: 80, y: 225, role: 'GK', color: '#8b5cf6' },
+        { x: 250, y: 225, role: 'D', color: '#ef4444' },
+        { x: 400, y: 225, role: 'A', color: '#10b981' },
+      ];
+    }
+    
+    if (category.includes('tactic') || category.includes('pass')) {
+      // Tactical - formation style
+      return [
+        { x: 80, y: 225, role: 'GK', color: '#8b5cf6' },
+        { x: 180, y: 140, role: 'LB', color: '#3b82f6' },
+        { x: 180, y: 310, role: 'RB', color: '#3b82f6' },
+        { x: 300, y: 180, role: 'CM', color: '#f59e0b' },
+        { x: 300, y: 270, role: 'CM', color: '#f59e0b' },
+        { x: 450, y: 225, role: 'ST', color: '#10b981' },
+      ];
+    }
+    
+    // Default formation
+    return [
+      { x: 200, y: 150, role: '1', color: '#10b981' },
+      { x: 350, y: 150, role: '2', color: '#10b981' },
+      { x: 500, y: 150, role: '3', color: '#10b981' },
+      { x: 200, y: 300, role: '4', color: '#3b82f6' },
+      { x: 350, y: 300, role: '5', color: '#3b82f6' },
+      { x: 500, y: 300, role: '6', color: '#3b82f6' },
+    ];
+  };
+  
+  // Get cone positions based on drill type
+  const getConePositions = () => {
+    if (category.includes('rondo') || category.includes('possession')) {
+      return [
+        { x: 200, y: 100 }, { x: 500, y: 100 },
+        { x: 200, y: 350 }, { x: 500, y: 350 }
+      ];
+    }
+    if (category.includes('dribbl')) {
+      return Array.from({ length: 8 }, (_, i) => ({
+        x: 200 + i * 50, y: 225
+      }));
+    }
+    if (category.includes('defend')) {
+      return [
+        { x: 180, y: 100 }, { x: 180, y: 350 },
+        { x: 400, y: 100 }, { x: 400, y: 350 }
+      ];
+    }
+    return [
+      { x: 200, y: 100 }, { x: 500, y: 100 },
+      { x: 200, y: 350 }, { x: 500, y: 350 }
+    ];
+  };
+
+  const players = getPlayerPositions();
+  const cones = getConePositions();
+
+  if (viewMode === '3d') {
+    // 3D Isometric view
+    return (
+      <svg viewBox="0 0 700 450" className="w-full h-full rounded-2xl" style={{ background: 'linear-gradient(180deg, #1a472a 0%, #145224 100%)' }}>
+        {/* 3D Field with perspective */}
+        <defs>
+          <linearGradient id="fieldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#2d5a3d" />
+            <stop offset="50%" stopColor="#1a472a" />
+            <stop offset="100%" stopColor="#0f3018" />
+          </linearGradient>
+        </defs>
+        
+        {/* Field with 3D perspective transform */}
+        <g transform="skewY(-5) translate(0, 20)">
+          {/* Grass stripes */}
+          {[...Array(8)].map((_, i) => (
+            <rect key={i} x={25 + i * 80} y="25" width="80" height="400" fill={i % 2 === 0 ? '#1d5030' : '#226138'} />
+          ))}
+          
+          {/* Field lines */}
+          <rect x="25" y="25" width="650" height="400" fill="none" stroke="#fff" strokeWidth="3" opacity="0.7" />
+          <line x1="350" y1="25" x2="350" y2="425" stroke="#fff" strokeWidth="2" opacity="0.7" />
+          <circle cx="350" cy="225" r="60" fill="none" stroke="#fff" strokeWidth="2" opacity="0.7" />
+          
+          {/* Penalty areas */}
+          <rect x="25" y="125" width="80" height="200" fill="none" stroke="#fff" strokeWidth="2" opacity="0.6" />
+          <rect x="595" y="125" width="80" height="200" fill="none" stroke="#fff" strokeWidth="2" opacity="0.6" />
+          
+          {/* Zone highlight */}
+          <rect x="200" y="100" width="300" height="250" fill="#fbbf24" fillOpacity="0.15" stroke="#fbbf24" strokeWidth="2" strokeDasharray="8,4" rx="8" />
+        </g>
+        
+        {/* 3D Players with shadows */}
+        {players.map((player, i) => (
+          <g key={i} transform={`translate(${player.x}, ${player.y - 10})`}>
+            {/* Shadow */}
+            <ellipse cx="0" cy="45" rx="15" ry="6" fill="rgba(0,0,0,0.4)" />
+            {/* Body */}
+            <ellipse cx="0" cy="20" rx="12" ry="16" fill={player.color} />
+            {/* Head */}
+            <circle cx="0" cy="0" r="10" fill="#fcd9b6" stroke="#333" strokeWidth="1" />
+            {/* Jersey number */}
+            <text x="0" y="24" textAnchor="middle" fontSize="10" fill="#fff" fontWeight="bold">{player.role}</text>
+          </g>
+        ))}
+        
+        {/* 3D Cones */}
+        {cones.map((cone, i) => (
+          <g key={i}>
+            <ellipse cx={cone.x} cy={cone.y + 5} rx="8" ry="3" fill="rgba(0,0,0,0.3)" />
+            <polygon points={`${cone.x},${cone.y - 15} ${cone.x - 10},${cone.y + 5} ${cone.x + 10},${cone.y + 5}`} fill="#f97316" stroke="#fff" strokeWidth="1.5" />
+          </g>
+        ))}
+        
+        {/* Ball */}
+        <g>
+          <ellipse cx="352" cy="232" rx="6" ry="3" fill="rgba(0,0,0,0.4)" />
+          <circle cx="350" cy="220" r="10" fill="#fff" stroke="#333" strokeWidth="1" />
+          <path d="M345,217 L348,220 L345,223 M355,217 L352,220 L355,223" fill="#333" />
+        </g>
+      </svg>
+    );
+  }
+
+  // 2D Overhead view (default)
+  return (
+    <SoccerField>
+      {/* Zone highlight */}
+      <Zone x="200" y="100" width="300" height="250" color="#fbbf24" label="Training Area" />
+      
+      {/* Cones */}
+      {cones.map((cone, i) => <Cone key={i} x={cone.x} y={cone.y} />)}
+      
+      {/* Players */}
+      {players.map((player, i) => (
+        <Jersey key={i} x={player.x} y={player.y} number={player.role} color={player.color} size={36} />
+      ))}
+      
+      {/* Ball */}
+      <Ball x={350} y={220} />
+      
+      {/* Movement arrows based on drill type */}
+      {category.includes('pass') && (
+        <>
+          <Arrow x1={players[0]?.x || 200} y1={players[0]?.y || 150} x2={players[1]?.x || 350} y2={players[1]?.y || 150} color="#10b981" dashed label="Pass" />
+          <Arrow x1={players[1]?.x || 350} y1={players[1]?.y || 150} x2={players[2]?.x || 500} y2={players[2]?.y || 150} color="#10b981" dashed />
+        </>
+      )}
+      
+      {category.includes('shoot') && (
+        <Arrow x1={300} y1={200} x2={100} y2={225} color="#fbbf24" label="Shot" />
+      )}
+    </SoccerField>
+  );
+};
+
+const DrillDetailPage = ({ drillId, onBack, sessions, setSessions, setShowModal, setSelectedDrill }) => {
+  // Handle both numeric and string IDs
+  const drill = drillsData.find(d => d.id === drillId || d.id === parseInt(drillId) || `d${d.id}` === drillId);
+  const [viewMode, setViewMode] = useState('2d');
+  
+  // Check for specific visualization or use dynamic
+  const DrillVisual = DrillVisuals[drillId] || DrillVisuals[`d${drillId}`];
+  
+  if (!drill) return (
+    <div className="text-center py-20">
+      <p className="text-gray-400 text-lg mb-4">Drill not found (ID: {drillId})</p>
+      <button onClick={onBack} className="text-emerald-400 hover:underline">Go back to drill library</button>
+    </div>
+  );
+
+  // Normalize drill data - handle different data structures
+  const normalizedDrill = {
+    ...drill,
+    steps: drill.steps || drill.instructions || [],
+    keyPoints: drill.keyPoints || drill.coachingPoints || [],
+    teaches: drill.teaches || [],
+    setup: typeof drill.setup === 'string' 
+      ? { description: drill.setup, players: drill.players }
+      : drill.setup || {},
+    shortDesc: drill.shortDesc || drill.description || '',
+    overview: drill.overview || drill.description || '',
+    difficulty: drill.difficulty === 'Beginner' ? 'Easy' 
+              : drill.difficulty === 'Intermediate' ? 'Medium' 
+              : drill.difficulty === 'Advanced' ? 'Advanced' 
+              : drill.difficulty || 'Medium'
+  };
 
   const getDifficultyColor = (diff) => {
-    if (diff === 'Easy') return 'bg-emerald-500/20 text-emerald-400';
-    if (diff === 'Medium') return 'bg-amber-500/20 text-amber-400';
+    if (diff === 'Easy' || diff === 'Beginner') return 'bg-emerald-500/20 text-emerald-400';
+    if (diff === 'Medium' || diff === 'Intermediate') return 'bg-amber-500/20 text-amber-400';
     return 'bg-red-500/20 text-red-400';
   };
 
   const handleAddToSession = () => {
-    if (sessions.length === 0) { alert('Create a session first!'); setShowModal('session'); }
-    else { setSelectedDrill(drill); setShowModal('addToSession'); }
+    if (!sessions || sessions.length === 0) { 
+      alert('Create a session first!'); 
+      setShowModal('session'); 
+    } else { 
+      setSelectedDrill(drill); 
+      setShowModal('addToSession'); 
+    }
   };
 
   return (
     <div className="space-y-8">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <button onClick={onBack} className="flex items-center space-x-2 text-gray-400 hover:text-white transition-colors"><ArrowLeft className="w-5 h-5" /><span>Back to Drills</span></button>
-        <button onClick={handleAddToSession} className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl font-semibold transition-all">Add to Session</button>
+        <button onClick={onBack} className="flex items-center space-x-2 text-gray-400 hover:text-white transition-colors">
+          <ArrowLeft className="w-5 h-5" /><span>Back to Drills</span>
+        </button>
+        <button onClick={handleAddToSession} className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl font-semibold transition-all">
+          Add to Session
+        </button>
       </div>
 
+      {/* Title Card */}
       <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
         <div className="flex items-start justify-between mb-4">
           <div>
-            <div className="flex items-center space-x-3 mb-2"><span className="text-4xl">{drill.icon}</span><h1 className="text-3xl font-bold text-white">{drill.name}</h1></div>
-            <p className="text-gray-400 text-lg">{drill.shortDesc}</p>
+            <div className="flex items-center space-x-3 mb-2">
+              <span className="text-4xl">{drill.icon}</span>
+              <h1 className="text-3xl font-bold text-white">{drill.name}</h1>
+            </div>
+            <p className="text-gray-400 text-lg">{normalizedDrill.shortDesc}</p>
           </div>
-          <span className={`px-4 py-2 rounded-xl font-bold ${getDifficultyColor(drill.difficulty)}`}>{drill.difficulty}</span>
+          <span className={`px-4 py-2 rounded-xl font-bold ${getDifficultyColor(normalizedDrill.difficulty)}`}>
+            {normalizedDrill.difficulty}
+          </span>
         </div>
         <div className="flex flex-wrap gap-4 mt-4">
-          <div className="flex items-center space-x-2 text-gray-300"><Clock className="w-5 h-5 text-emerald-400" /><span>{drill.duration}</span></div>
-          <div className="flex items-center space-x-2 text-gray-300"><Users className="w-5 h-5 text-blue-400" /><span>{drill.setup?.players || 'N/A'}</span></div>
-          <div className="flex items-center space-x-2 text-gray-300"><Target className="w-5 h-5 text-amber-400" /><span>{drill.category}</span></div>
+          <div className="flex items-center space-x-2 text-gray-300">
+            <Clock className="w-5 h-5 text-emerald-400" />
+            <span>{drill.duration}</span>
+          </div>
+          <div className="flex items-center space-x-2 text-gray-300">
+            <Users className="w-5 h-5 text-blue-400" />
+            <span>{normalizedDrill.setup?.players || drill.players || 'N/A'} players</span>
+          </div>
+          <div className="flex items-center space-x-2 text-gray-300">
+            <Target className="w-5 h-5 text-amber-400" />
+            <span>{drill.category}</span>
+          </div>
+          {drill.minAge && drill.maxAge && (
+            <div className="flex items-center space-x-2 text-gray-300">
+              <span className="text-purple-400">👤</span>
+              <span>Ages {drill.minAge}-{drill.maxAge}</span>
+            </div>
+          )}
         </div>
       </div>
 
+      {/* Field Setup - Side by Side Views */}
       <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-        <h2 className="text-xl font-bold text-white mb-4">Field Setup</h2>
-        <div className="aspect-[16/10] mb-6">{DrillVisual && <DrillVisual />}</div>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-white">Field Setup</h2>
+          <div className="flex items-center space-x-2 bg-white/5 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('2d')}
+              className={`flex items-center space-x-1 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === '2d' ? 'bg-emerald-500 text-white' : 'text-gray-400 hover:text-white'}`}
+            >
+              <Grid3X3 className="w-4 h-4" />
+              <span>2D</span>
+            </button>
+            <button
+              onClick={() => setViewMode('3d')}
+              className={`flex items-center space-x-1 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === '3d' ? 'bg-emerald-500 text-white' : 'text-gray-400 hover:text-white'}`}
+            >
+              <Eye className="w-4 h-4" />
+              <span>3D</span>
+            </button>
+          </div>
+        </div>
+        
+        <div className="aspect-[16/10] mb-6">
+          {DrillVisual ? <DrillVisual /> : <DynamicDrillVisual drill={drill} viewMode={viewMode} />}
+        </div>
+        
         <Legend />
       </div>
 
+      {/* Setup & Teaching Points */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-          <h2 className="text-xl font-bold text-white mb-4 flex items-center space-x-2"><Target className="w-5 h-5 text-emerald-400" /><span>Setup Requirements</span></h2>
+          <h2 className="text-xl font-bold text-white mb-4 flex items-center space-x-2">
+            <Target className="w-5 h-5 text-emerald-400" />
+            <span>Setup Requirements</span>
+          </h2>
           <div className="space-y-3">
-            <div className="flex justify-between py-2 border-b border-white/10"><span className="text-gray-400">Players</span><span className="text-white font-medium">{drill.setup?.players || 'N/A'}</span></div>
-            <div className="flex justify-between py-2 border-b border-white/10"><span className="text-gray-400">Area Size</span><span className="text-white font-medium">{drill.setup?.area || 'N/A'}</span></div>
-            <div className="flex justify-between py-2 border-b border-white/10"><span className="text-gray-400">Cones Needed</span><span className="text-white font-medium">{drill.setup?.cones || 'N/A'}</span></div>
-            <div className="flex justify-between py-2 border-b border-white/10"><span className="text-gray-400">Cone Spacing</span><span className="text-white font-medium">{drill.setup?.coneSpacing || 'N/A'}</span></div>
-            <div className="flex justify-between py-2"><span className="text-gray-400">Equipment</span><span className="text-white font-medium text-right max-w-[60%]">{drill.setup?.equipment || 'N/A'}</span></div>
+            <div className="flex justify-between py-2 border-b border-white/10">
+              <span className="text-gray-400">Players</span>
+              <span className="text-white font-medium">{normalizedDrill.setup?.players || drill.players || 'N/A'}</span>
+            </div>
+            {typeof drill.setup === 'string' ? (
+              <div className="py-2">
+                <span className="text-gray-400 block mb-2">Setup</span>
+                <span className="text-white">{drill.setup}</span>
+              </div>
+            ) : (
+              <>
+                <div className="flex justify-between py-2 border-b border-white/10">
+                  <span className="text-gray-400">Area Size</span>
+                  <span className="text-white font-medium">{normalizedDrill.setup?.area || 'See setup'}</span>
+                </div>
+                <div className="flex justify-between py-2 border-b border-white/10">
+                  <span className="text-gray-400">Cones</span>
+                  <span className="text-white font-medium">{normalizedDrill.setup?.cones || '4-6'}</span>
+                </div>
+                <div className="flex justify-between py-2">
+                  <span className="text-gray-400">Equipment</span>
+                  <span className="text-white font-medium text-right max-w-[60%]">{normalizedDrill.setup?.equipment || 'Balls, cones, bibs'}</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
+        
         <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-          <h2 className="text-xl font-bold text-white mb-4 flex items-center space-x-2"><Lightbulb className="w-5 h-5 text-amber-400" /><span>What This Teaches</span></h2>
+          <h2 className="text-xl font-bold text-white mb-4 flex items-center space-x-2">
+            <Lightbulb className="w-5 h-5 text-amber-400" />
+            <span>What This Teaches</span>
+          </h2>
           <div className="space-y-2">
-            {(drill.teaches || []).map((item, i) => (
-              <div key={i} className="flex items-center space-x-3 py-2"><CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" /><span className="text-gray-300">{item}</span></div>
-            ))}
-            {(!drill.teaches || drill.teaches.length === 0) && (
-              <p className="text-gray-500">No teaching points specified.</p>
+            {normalizedDrill.teaches.length > 0 ? (
+              normalizedDrill.teaches.map((item, i) => (
+                <div key={i} className="flex items-center space-x-3 py-2">
+                  <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                  <span className="text-gray-300">{item}</span>
+                </div>
+              ))
+            ) : normalizedDrill.keyPoints.length > 0 ? (
+              normalizedDrill.keyPoints.slice(0, 4).map((item, i) => (
+                <div key={i} className="flex items-center space-x-3 py-2">
+                  <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                  <span className="text-gray-300">{item}</span>
+                </div>
+              ))
+            ) : (
+              <p className="text-gray-500">See coaching points below.</p>
             )}
           </div>
         </div>
       </div>
 
+      {/* Instructions */}
       <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
         <h2 className="text-xl font-bold text-white mb-4">Step-by-Step Instructions</h2>
         <div className="space-y-4">
-          {(drill.steps || []).map((step, i) => (
-            <div key={i} className="flex items-start space-x-4 p-4 bg-white/5 rounded-xl"><div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center flex-shrink-0"><span className="text-white font-bold">{i + 1}</span></div><p className="text-gray-300 pt-1">{step}</p></div>
-          ))}
-          {(!drill.steps || drill.steps.length === 0) && (
-            <p className="text-gray-500">No steps specified.</p>
+          {normalizedDrill.steps.length > 0 ? (
+            normalizedDrill.steps.map((step, i) => (
+              <div key={i} className="flex items-start space-x-4 p-4 bg-white/5 rounded-xl">
+                <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <span className="text-white font-bold">{i + 1}</span>
+                </div>
+                <p className="text-gray-300 pt-1">{step}</p>
+              </div>
+            ))
+          ) : (
+            <p className="text-gray-500">No specific steps provided. Follow the setup and coaching points.</p>
           )}
         </div>
       </div>
 
+      {/* Coaching Points */}
       <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-        <h2 className="text-xl font-bold text-white mb-4 flex items-center space-x-2"><AlertCircle className="w-5 h-5 text-amber-400" /><span>Key Coaching Points</span></h2>
+        <h2 className="text-xl font-bold text-white mb-4 flex items-center space-x-2">
+          <AlertCircle className="w-5 h-5 text-amber-400" />
+          <span>Key Coaching Points</span>
+        </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {(drill.keyPoints || []).map((point, i) => (
-            <div key={i} className="flex items-center space-x-3 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl"><Zap className="w-5 h-5 text-amber-400 flex-shrink-0" /><span className="text-gray-300">{point}</span></div>
-          ))}
-          {(!drill.keyPoints || drill.keyPoints.length === 0) && (
-            <p className="text-gray-500">No coaching points specified.</p>
+          {normalizedDrill.keyPoints.length > 0 ? (
+            normalizedDrill.keyPoints.map((point, i) => (
+              <div key={i} className="flex items-center space-x-3 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                <Zap className="w-5 h-5 text-amber-400 flex-shrink-0" />
+                <span className="text-gray-300">{point}</span>
+              </div>
+            ))
+          ) : (
+            <p className="text-gray-500 col-span-2">No coaching points specified.</p>
           )}
         </div>
       </div>
 
-      {drill.proTip && (
+      {/* Pro Tip */}
+      {normalizedDrill.proTip && (
         <div className="bg-gradient-to-r from-emerald-500/20 to-emerald-600/10 border border-emerald-500/30 rounded-2xl p-6">
-          <h2 className="text-xl font-bold text-white mb-3 flex items-center space-x-2"><span>💡</span><span>Pro Tip</span></h2>
-          <p className="text-gray-300 text-lg italic">"{drill.proTip}"</p>
+          <h2 className="text-xl font-bold text-white mb-3 flex items-center space-x-2">
+            <span>💡</span><span>Pro Tip</span>
+          </h2>
+          <p className="text-gray-300 text-lg italic">"{normalizedDrill.proTip}"</p>
         </div>
       )}
 
-      {drill.overview && (
+      {/* Overview */}
+      {normalizedDrill.overview && normalizedDrill.overview !== normalizedDrill.shortDesc && (
         <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
           <h2 className="text-xl font-bold text-white mb-4">Overview</h2>
-          <p className="text-gray-300 leading-relaxed">{drill.overview}</p>
+          <p className="text-gray-300 leading-relaxed">{normalizedDrill.overview}</p>
         </div>
       )}
     </div>
