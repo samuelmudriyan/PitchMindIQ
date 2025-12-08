@@ -22,9 +22,6 @@ const apiCall = async (endpoint, clerkUserId, options = {}) => {
   return response.json();
 };
 
-// User-specific storage keys
-const getStorageKey = (key, odUserId) => `pitchmind_${key}_${userId}`;
-
 const loadFromStorage = (key, userId, defaultValue = []) => {
   if (!userId) return defaultValue;
   try {
@@ -725,10 +722,7 @@ useEffect(() => {
   useEffect(() => { if (user?.id) saveToStorage('sessions', user.id, sessions); }, [sessions, user?.id]);
   useEffect(() => { if (user?.id) saveToStorage('reports', user.id, reports); }, [reports, user?.id]);
   useEffect(() => { if (user?.id) saveToStorage('chat_history', user.id, chatHistory); }, [chatHistory, user?.id]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.VIDEOS, videos); }, [videos]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.SESSIONS, sessions); }, [sessions]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.REPORTS, reports); }, [reports]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.CHAT_HISTORY, chatHistory); }, [chatHistory]);
+  
 
   // TeamSnap OAuth callback handler
   useEffect(() => {
