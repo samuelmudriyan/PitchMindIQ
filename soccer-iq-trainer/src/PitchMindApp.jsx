@@ -22,10 +22,23 @@ const apiCall = async (endpoint, clerkUserId, options = {}) => {
   return response.json();
 };
 
-const STORAGE_KEYS = { PLAYERS: 'pitchmind_players', VIDEOS: 'pitchmind_videos', SESSIONS: 'pitchmind_sessions', REPORTS: 'pitchmind_reports', CHAT_HISTORY: 'pitchmind_chat_history', TEAMS: 'pitchmind_teams' };
-const loadFromStorage = (key, defaultValue = []) => { try { const saved = localStorage.getItem(key); return saved ? JSON.parse(saved) : defaultValue; } catch { return defaultValue; } };
-const saveToStorage = (key, data) => { localStorage.setItem(key, JSON.stringify(data)); };
+// User-specific storage keys
+const getStorageKey = (key, odUserId) => `pitchmind_${key}_${userId}`;
 
+const loadFromStorage = (key, userId, defaultValue = []) => {
+  if (!userId) return defaultValue;
+  try {
+    const saved = localStorage.getItem(`pitchmind_${key}_${userId}`);
+    return saved ? JSON.parse(saved) : defaultValue;
+  } catch {
+    return defaultValue;
+  }
+};
+
+const saveToStorage = (key, userId, data) => {
+  if (!userId) return;
+  localStorage.setItem(`pitchmind_${key}_${userId}`, JSON.stringify(data));
+};
 // Jersey color options
 const JERSEY_COLORS = [
   { name: 'Red', value: '#ef4444', light: '#fecaca' },
@@ -607,8 +620,12 @@ export default function PitchMindApp() {
   const [activeClipIndex, setActiveClipIndex] = useState(null);
   const clipTimeoutRef = useRef(null);
   
-  const [players, setPlayers] = useState(() => loadFromStorage(STORAGE_KEYS.PLAYERS, []));
-  const [teams, setTeams] = useState(() => loadFromStorage(STORAGE_KEYS.TEAMS, []));
+  const [players, setPlayers] = useState([]);
+  const [teams, setTeams] = useState([]);
+  const [videos, setVideos] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const [reports, setReports] = useState([]);
+  const [chatHistory, setChatHistory] = useState([]);
   const [selectedTeamFilter, setSelectedTeamFilter] = useState('all');
   const [videos, setVideos] = useState(() => loadFromStorage(STORAGE_KEYS.VIDEOS, []));
   const [sessions, setSessions] = useState(() => loadFromStorage(STORAGE_KEYS.SESSIONS, []));
@@ -632,11 +649,23 @@ export default function PitchMindApp() {
   const fileInputRef = useRef(null);
 
   // Sync data from database on mount
-  useEffect(() => {
-    if (user?.id && !dataSynced) {
+  // Load data when user is available
+useEffect(() => {
+  if (user?.id) {
+    // Load from user-specific localStorage first (fast)
+    setPlayers(loadFromStorage('players', user.id, []));
+    setTeams(loadFromStorage('teams', user.id, []));
+    setVideos(loadFromStorage('videos', user.id, []));
+    setSessions(loadFromStorage('sessions', user.id, []));
+    setReports(loadFromStorage('reports', user.id, []));
+    setChatHistory(loadFromStorage('chat_history', user.id, []));
+    
+    // Then sync from database (authoritative)
+    if (!dataSynced) {
       syncDataFromDB(false);
     }
-  }, [user?.id, dataSynced]);
+  }
+}, [user?.id, dataSynced]);
 
   const syncDataFromDB = async (forceRefresh = false) => {
     if (!user?.id) return;
@@ -693,8 +722,12 @@ export default function PitchMindApp() {
   };
 
   // Save to localStorage as backup
-  useEffect(() => { saveToStorage(STORAGE_KEYS.PLAYERS, players); }, [players]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.TEAMS, teams); }, [teams]);
+  useEffect(() => { if (user?.id) saveToStorage('players', user.id, players); }, [players, user?.id]);
+  useEffect(() => { if (user?.id) saveToStorage('teams', user.id, teams); }, [teams, user?.id]);
+  useEffect(() => { if (user?.id) saveToStorage('videos', user.id, videos); }, [videos, user?.id]);
+  useEffect(() => { if (user?.id) saveToStorage('sessions', user.id, sessions); }, [sessions, user?.id]);
+  useEffect(() => { if (user?.id) saveToStorage('reports', user.id, reports); }, [reports, user?.id]);
+  useEffect(() => { if (user?.id) saveToStorage('chat_history', user.id, chatHistory); }, [chatHistory, user?.id]);
   useEffect(() => { saveToStorage(STORAGE_KEYS.VIDEOS, videos); }, [videos]);
   useEffect(() => { saveToStorage(STORAGE_KEYS.SESSIONS, sessions); }, [sessions]);
   useEffect(() => { saveToStorage(STORAGE_KEYS.REPORTS, reports); }, [reports]);
