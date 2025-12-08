@@ -627,13 +627,10 @@ export default function PitchMindApp() {
   const [reports, setReports] = useState([]);
   const [chatHistory, setChatHistory] = useState([]);
   const [selectedTeamFilter, setSelectedTeamFilter] = useState('all');
-  const [videos, setVideos] = useState(() => loadFromStorage(STORAGE_KEYS.VIDEOS, []));
-  const [sessions, setSessions] = useState(() => loadFromStorage(STORAGE_KEYS.SESSIONS, []));
-  const [reports, setReports] = useState(() => loadFromStorage(STORAGE_KEYS.REPORTS, []));
-  const [chatHistory, setChatHistory] = useState(() => loadFromStorage(STORAGE_KEYS.CHAT_HISTORY, []));
   const [userProfile, setUserProfile] = useState(null);
   const [dataLoading, setDataLoading] = useState(false);
   const [dataSynced, setDataSynced] = useState(false);
+  const [localDataLoaded, setLocalDataLoaded] = useState(false);
   
   const [showModal, setShowModal] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
