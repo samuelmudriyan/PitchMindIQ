@@ -618,7 +618,15 @@ export default function PitchMindApp() {
   const [isPlayingClip, setIsPlayingClip] = useState(false);
   const [activeClipIndex, setActiveClipIndex] = useState(null);
   const clipTimeoutRef = useRef(null);
-  
+
+  const [savedFormations, setSavedFormations] = useState(() => {
+  if (user?.id) {
+    const saved = localStorage.getItem('pitchmind_formations_' + user.id);
+    return saved ? JSON.parse(saved) : [];
+  }
+  return [];
+});
+  const teams = [...new Map(players.filter(p => p.teamName).map(p => [p.teamName, { id: p.teamId || p.teamName, name: p.teamName }])).values()];
   const [players, setPlayers] = useState([]);
   const [teams, setTeams] = useState([]);
   const [videos, setVideos] = useState([]);
@@ -2080,7 +2088,24 @@ useEffect(() => {
       case 'planner': return <SessionPlannerPage />;
       case 'reports': return <ReportsPage />;
       case 'drills': return (<PageWrapper title="Drill Library" showSearch sidebarCollapsed={sidebarCollapsed} searchQuery={searchQuery} setSearchQuery={setSearchQuery} currentPage="drills" setCurrentPage={setCurrentPage}><DrillsPage sessions={sessions} setCurrentPage={setCurrentPage} setSelectedDrillId={setSelectedDrillId} setShowModal={setShowModal} searchQuery={searchQuery} /></PageWrapper>);
-      case 'formations': return (<PageWrapper title="Formation Creator" sidebarCollapsed={sidebarCollapsed} currentPage="formations" setCurrentPage={setCurrentPage}><FormationCreator onSave={(formation) => console.log('Saved:', formation)} teamName={user?.firstName ? `${user.firstName}'s Team` : 'My Team'} /></PageWrapper>);
+      case 'formations': return (
+  <PageWrapper title="Formation Creator" sidebarCollapsed={sidebarCollapsed} currentPage="formations" setCurrentPage={setCurrentPage}>
+    <FormationCreator 
+      teams={teams}
+      players={players}
+      savedFormations={savedFormations || []}
+      onSave={(formation) => {
+        setSavedFormations(prev => [...(prev || []), formation]);
+        localStorage.setItem('pitchmind_formations_' + user?.id, JSON.stringify([...(savedFormations || []), formation]));
+      }}
+      onDeleteFormation={(id) => {
+        const updated = (savedFormations || []).filter(f => f.id !== id);
+        setSavedFormations(updated);
+        localStorage.setItem('pitchmind_formations_' + user?.id, JSON.stringify(updated));
+      }}
+    />
+  </PageWrapper>
+);
       case 'drillDetail': return (<PageWrapper title="Drill Details" sidebarCollapsed={sidebarCollapsed} currentPage="drillDetail" setCurrentPage={setCurrentPage}><DrillDetailPage drillId={selectedDrillId} onBack={() => setCurrentPage('drills')} sessions={sessions} setSessions={setSessions} setShowModal={setShowModal} setSelectedDrill={setSelectedDrill} /></PageWrapper>);
       case 'stats': return <TeamStatsPage />;
       case 'progress': return <ProgressPage />;
