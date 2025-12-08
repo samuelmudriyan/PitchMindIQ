@@ -3,7 +3,7 @@ import { useUser, UserButton } from '@clerk/clerk-react';
 import { Upload, CheckCircle, AlertCircle, Loader2, Clock, Brain, Video, Zap, MousePointer, Target, Sparkles, Award, RotateCcw, Share2, Download, Save, Plus, X, ChevronRight, ChevronLeft, Home, Users, FileVideo, Lightbulb, Clipboard, FileText, BookOpen, BarChart3, TrendingUp, Bell, Settings, Search, Calendar, Edit, Trash2, Eye, PlayCircle, Send, Timer, ArrowUp, ArrowDown, ArrowRight, Play, Pause, StopCircle, User, Hash, Palette, Link2, RefreshCw, Check, Database } from 'lucide-react';
 import logo from './assets/logo.png';
 import DrillDetailPage from './DrillDetailPage';
-import FormationCreator from './FormationCreator';
+import FormationCreator from './Formationcreator';
 import DrillsPage from './DrillsPage';
 import { drillsData } from './DrillData';
 
