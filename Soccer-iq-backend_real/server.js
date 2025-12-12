@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
-const FormData = require('form-data');
+const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
@@ -13,9 +13,10 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Environment variables
-const MODAL_ENDPOINT = process.env.MODAL_ENDPOINT || 'https://pitchmind--pitchmind-gpu-tracker-v6-fastapi-app.modal.run';
+const MODAL_WEBHOOK_URL = process.env.MODAL_WEBHOOK_URL || 'https://pitchmind--pitchmind-production-tracker-track-webhook.modal.run/track';
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const DATABASE_URL = process.env.DATABASE_URL;
+const BACKEND_URL = process.env.BACKEND_URL || 'https://pitchmind-backend-production-483d.up.railway.app';
 
 // TeamSnap Config
 const TEAMSNAP_CLIENT_ID = process.env.TEAMSNAP_CLIENT_ID;
@@ -184,7 +185,7 @@ async function initDatabase() {
 initDatabase();
 
 // ============================================
-// CORS CONFIGURATION - Updated to allow x-user-id
+// CORS CONFIGURATION
 // ============================================
 app.use(cors({
   origin: [
@@ -197,14 +198,13 @@ app.use(cors({
   allowedHeaders: [
     'Content-Type', 
     'Authorization',
-    'x-user-id',      // Added for Stripe subscription checks
+    'x-user-id',
     'X-User-Id',
     'x-clerk-user-id'
   ],
   credentials: true
 }));
 
-// Handle preflight requests explicitly
 app.options('*', cors());
 
 // ============================================
@@ -219,10 +219,21 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // ============================================
-// STRIPE ROUTES - Mount before other routes
+// SERVE UPLOADS DIRECTORY (CRITICAL FOR MODAL)
+// ============================================
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Make uploads publicly accessible
+app.use('/uploads', express.static(uploadsDir));
+
+// ============================================
+// STRIPE ROUTES
 // ============================================
 app.use('/api/stripe', stripeRoutes);
-app.use('/api', stripeRoutes);  // Also mount for /api/subscription/status
+app.use('/api', stripeRoutes);
 
 // Helper: Get or create user from Clerk ID
 async function getOrCreateUser(clerkId, userData = {}) {
@@ -277,11 +288,6 @@ async function authMiddleware(req, res, next) {
 }
 
 // File upload config
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
@@ -292,9 +298,10 @@ const upload = multer({ storage, limits: { fileSize: 2000 * 1024 * 1024 } });
 app.get('/', (req, res) => {
   res.json({ 
     status: 'PitchMind Backend Running',
-    version: '3.1',
-    features: ['video-analysis', 'ai-coach', 'teamsnap-integration', 'database', 'stripe-payments'],
+    version: '4.0 - Custom Tracker',
+    features: ['video-analysis', 'custom-tracker', 'ai-coach', 'teamsnap-integration', 'database', 'stripe-payments'],
     database: DATABASE_URL ? 'connected' : 'not configured',
+    modal: MODAL_WEBHOOK_URL ? 'configured' : 'not configured',
     teamsnap: TEAMSNAP_CLIENT_ID ? 'configured' : 'not configured',
     stripe: process.env.STRIPE_SECRET_KEY ? 'configured' : 'not configured'
   });
@@ -776,58 +783,96 @@ app.get('/api/sync', authMiddleware, async (req, res) => {
 });
 
 // ============================================
-// VIDEO ANALYSIS ENDPOINT
+// VIDEO ANALYSIS ENDPOINT - UPDATED FOR CUSTOM TRACKER
 // ============================================
 app.post('/api/analyze', upload.single('video'), async (req, res) => {
-  console.log('Analysis request received');
+  console.log('========================================');
+  console.log('📹 VIDEO ANALYSIS - CUSTOM TRACKER');
+  console.log('========================================');
   
   if (!req.file) {
     return res.status(400).json({ error: 'No video file uploaded' });
   }
 
-  const { clickX, clickY, clickTimestamp, playerName, jerseyNumber } = req.body;
-  console.log(`Processing: ${req.file.filename}, Click: (${clickX}, ${clickY}) at ${clickTimestamp}s`);
+  const { clickX, clickY, clickTimestamp } = req.body;
+  console.log(`Video: ${req.file.filename}`);
+  console.log(`Click: (${clickX}%, ${clickY}%) at ${clickTimestamp}s`);
 
   try {
-    const formData = new FormData();
-    formData.append('video', fs.createReadStream(req.file.path), {
-      filename: req.file.originalname || 'video.mp4',
-      contentType: req.file.mimetype || 'video/mp4'
+    // Generate publicly accessible video URL
+    const videoUrl = `${BACKEND_URL}/uploads/${req.file.filename}`;
+    console.log(`📹 Video URL: ${videoUrl}`);
+    
+    // Call Modal Custom Tracker
+    console.log(`🚀 Calling Modal tracker: ${MODAL_WEBHOOK_URL}`);
+    
+    const modalResponse = await fetch(MODAL_WEBHOOK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        video_url: videoUrl,
+        click_x: parseFloat(clickX) || 50.0,
+        click_y: parseFloat(clickY) || 50.0,
+        click_timestamp: parseFloat(clickTimestamp) || 0.0
+      }),
+      timeout: 600000  // 10 minute timeout
     });
-    formData.append('click_x', String(clickX || '0'));
-    formData.append('click_y', String(clickY || '0'));
-    formData.append('click_timestamp', String(clickTimestamp || '0'));
 
-    const submitPromise = new Promise((resolve, reject) => {
-      formData.submit(MODAL_ENDPOINT, (err, response) => {
-        if (err) return reject(err);
-        
-        let data = '';
-        response.on('data', chunk => { data += chunk; });
-        response.on('end', () => resolve({ statusCode: response.statusCode, body: data }));
-        response.on('error', reject);
+    if (!modalResponse.ok) {
+      const errorText = await modalResponse.text();
+      console.error('❌ Modal error:', errorText);
+      
+      // Clean up temp file
+      fs.unlink(req.file.path, (err) => {
+        if (err) console.error('Failed to delete temp file:', err);
       });
-    });
+      
+      return res.status(500).json({ 
+        error: 'Modal tracking failed', 
+        details: errorText 
+      });
+    }
 
-    const modalResponse = await submitPromise;
-
+    const results = await modalResponse.json();
+    
+    // Clean up temp file after successful processing
     fs.unlink(req.file.path, (err) => {
       if (err) console.error('Failed to delete temp file:', err);
     });
 
-    if (modalResponse.statusCode !== 200) {
-      console.error('Modal error:', modalResponse.body);
-      return res.status(500).json({ error: 'Analysis failed', details: modalResponse.body });
+    if (!results.success) {
+      console.error('❌ Tracking failed:', results.error);
+      return res.status(500).json({ 
+        error: 'Tracking failed', 
+        details: results.error 
+      });
     }
 
-    const results = JSON.parse(modalResponse.body);
-    console.log('Analysis complete:', results.decision_points?.length || 0, 'decision points');
-    res.json(results);
+    console.log('✅ Analysis complete!');
+    console.log(`   Target player: ID ${results.target_player_id}`);
+    console.log(`   Decision points: ${results.decision_points?.length || 0}`);
+    
+    // Return results with video URL for frontend
+    res.json({
+      ...results,
+      video_url: videoUrl,
+      video_filename: req.file.filename
+    });
 
   } catch (error) {
-    console.error('Analysis error:', error);
-    if (req.file?.path) fs.unlink(req.file.path, () => {});
-    res.status(500).json({ error: 'Analysis failed', message: error.message });
+    console.error('❌ Analysis error:', error);
+    
+    // Clean up temp file on error
+    if (req.file?.path) {
+      fs.unlink(req.file.path, () => {});
+    }
+    
+    res.status(500).json({ 
+      error: 'Analysis failed', 
+      message: error.message 
+    });
   }
 });
 
@@ -1007,7 +1052,10 @@ app.get('/api/teamsnap/status', (req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 PitchMind Backend v3.1 running on port ${PORT}`);
-  console.log(`💾 Database: ${DATABASE_URL ? 'connected' : 'not configured'}`);
-  console.log(`💳 Stripe: ${process.env.STRIPE_SECRET_KEY ? 'configured' : 'not configured'}`);
+  console.log(`🚀 PitchMind Backend v4.0 - Custom Tracker`);
+  console.log(`   Port: ${PORT}`);
+  console.log(`   Database: ${DATABASE_URL ? '✅ Connected' : '❌ Not configured'}`);
+  console.log(`   Modal: ${MODAL_WEBHOOK_URL ? '✅ Configured' : '❌ Not configured'}`);
+  console.log(`   Stripe: ${process.env.STRIPE_SECRET_KEY ? '✅ Configured' : '❌ Not configured'}`);
+  console.log(`========================================`);
 });
