@@ -800,7 +800,8 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
 
   try {
     // Generate publicly accessible video URL
-    const videoUrl = `${BACKEND_URL}/uploads/${req.file.filename}`;
+    const encodedFilename = encodeURIComponent(req.file.filename);
+    const videoUrl = `${BACKEND_URL}/uploads/${encodedFilename}`;
     console.log(`📹 Video URL: ${videoUrl}`);
     
     // Call Modal Custom Tracker
