@@ -76,8 +76,23 @@ def track_player(
     import urllib.request
     import os
     
-    # OPTIMIZATION: Process every Nth frame for long videos
-    FRAME_SAMPLE_RATE = 10  # Process every 10th frame (10x faster)
+    # Adaptive frame sampling helper function
+    def get_sample_rate(total_frames, fps):
+        """
+        Dynamically adjust frame sampling based on video length.
+        Longer videos = more aggressive sampling to stay under 2hr limit.
+        """
+        duration_seconds = total_frames / fps
+        duration_minutes = duration_seconds / 60
+        
+        if duration_minutes < 5:
+            return 5   # High quality for short videos
+        elif duration_minutes < 10:
+            return 10  # Medium quality
+        elif duration_minutes < 15:
+            return 20  # Lower quality but faster
+        else:
+            return 30  # Very aggressive for 15+ min videos
     
     print(f"🎬 PitchMind Tracker Starting", file=sys.stderr)
     print(f"   Video URL: {video_url}", file=sys.stderr)
@@ -135,27 +150,6 @@ def track_player(
             return (green_ratio < GREEN_RATIO_THRESHOLD or 
                     hist_diff < HIST_DIFF_THRESHOLD), hist
         
-        # Helper: Classify role
-        def classify_role(bbox, frame, frame_height):
-            x1, y1, x2, y2 = map(int, bbox)
-            center_y = (y1 + y2) / 2
-            
-            if center_y < frame_height * 0.2 or center_y > frame_height * 0.8:
-                return "goalkeeper"
-            
-            h = y2 - y1
-            if h > 0:
-                jersey_roi = frame[y1:y1+int(h*0.6), x1:x2]
-                
-                if jersey_roi.size > 0:
-                    hsv = cv2.cvtColor(jersey_roi, cv2.COLOR_BGR2HSV)
-                    black_mask = cv2.inRange(hsv, (0, 0, 0), (180, 50, 50))
-                    
-                    if cv2.countNonZero(black_mask) > jersey_roi.size * 0.4:
-                        return "referee"
-            
-            return "player"
-        
         # Open video
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -169,6 +163,11 @@ def track_player(
         duration = frame_count / fps if fps > 0 else 0
         
         print(f"🎥 Video: {width}x{height}, {fps:.1f} fps, {frame_count} frames ({duration:.1f}s)", file=sys.stderr)
+        
+        # Calculate adaptive sample rate
+        sample_rate = get_sample_rate(frame_count, fps)
+        estimated_frames = frame_count // sample_rate
+        print(f"📊 Adaptive sampling: every {sample_rate} frames ({estimated_frames} total frames to process)", file=sys.stderr)
         
         # Convert click coordinates
         click_x_px = (click_x / 100) * width
@@ -198,9 +197,8 @@ def track_player(
                 print(f"  Progress: {progress}%", file=sys.stderr)
                 last_progress = progress
             
-            # OPTIMIZATION: Skip frames for faster processing of long videos
-            # Process every 10th frame instead of every frame (10x speedup)
-            if frame_idx % FRAME_SAMPLE_RATE != 0:
+            # OPTIMIZATION: Skip frames using adaptive sampling
+            if frame_idx % sample_rate != 0:
                 frame_idx += 1
                 continue
             
@@ -374,7 +372,6 @@ def track_player(
             'error': error_msg,
             'stack_trace': stack_trace
         }
-
 
 # Webhook endpoint - Updated to fastapi_endpoint
 @app.function(
