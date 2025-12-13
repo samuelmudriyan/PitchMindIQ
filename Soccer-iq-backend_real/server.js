@@ -819,108 +819,88 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
     message: 'Video analysis started. This may take 12-15 minutes for long videos.'
   });
 
-  // Process video in background
+  // Process video in background (DO NOT USE res AFTER THIS POINT)
   (async () => {
     try {
-    // Generate publicly accessible video URL with proper encoding
-    const encodedFilename = encodeURIComponent(req.file.filename);
-    const videoUrl = `${BACKEND_URL}/uploads/${encodedFilename}`;
-    console.log(`📹 Video URL: ${videoUrl}`);
-    
-    // Call Modal Custom Tracker
-    console.log(`🚀 Calling Modal tracker: ${MODAL_WEBHOOK_URL}`);
-    
-   // Update progress: calling Modal
-    analysisJobs.set(jobId, {
-      status: 'processing',
-      progress: 5,
-      message: 'Sending video to GPU tracker...',
-      startTime: analysisJobs.get(jobId).startTime
-    });
-
-    const modalResponse = await fetch(MODAL_WEBHOOK_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        video_url: videoUrl,
-        click_x: parseFloat(clickX) || 50.0,
-        click_y: parseFloat(clickY) || 50.0,
-        click_timestamp: parseFloat(clickTimestamp) || 0.0
-      }),
-      timeout: 7200000  // 2 hour timeout for full highlights
-    });
-
-    // Update progress: Modal processing
-    analysisJobs.set(jobId, {
-      status: 'processing',
-      progress: 50,
-      message: 'Tracking player movements...',
-      startTime: analysisJobs.get(jobId).startTime
-    });
-    if (!modalResponse.ok) {
-      const errorText = await modalResponse.text();
-      console.error('❌ Modal error:', errorText);
+      // Generate publicly accessible video URL with proper encoding
+      const encodedFilename = encodeURIComponent(req.file.filename);
+      const videoUrl = `${BACKEND_URL}/uploads/${encodedFilename}`;
+      console.log(`📹 Video URL: ${videoUrl}`);
       
-      // Clean up temp file
-      fs.unlink(req.file.path, (err) => {
-        if (err) console.error('Failed to delete temp file:', err);
+      // Update progress: calling Modal
+      analysisJobs.set(jobId, {
+        status: 'processing',
+        progress: 5,
+        message: 'Sending video to GPU tracker...',
+        startTime: analysisJobs.get(jobId).startTime
       });
       
-      return res.status(500).json({ 
-        error: 'Modal tracking failed', 
-        details: errorText 
+      // Call Modal Custom Tracker
+      console.log(`🚀 Calling Modal tracker: ${MODAL_WEBHOOK_URL}`);
+      
+      const modalResponse = await fetch(MODAL_WEBHOOK_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          video_url: videoUrl,
+          click_x: parseFloat(clickX) || 50.0,
+          click_y: parseFloat(clickY) || 50.0,
+          click_timestamp: parseFloat(clickTimestamp) || 0.0
+        }),
+        timeout: 7200000  // 2 hour timeout for full highlights
       });
-    }
 
-    const results = await modalResponse.json();
-    
-    // Clean up temp file after successful processing
-    fs.unlink(req.file.path, (err) => {
-      if (err) console.error('Failed to delete temp file:', err);
-    });
-
-    if (!results.success) {
-      console.error('❌ Tracking failed:', results.error);
-      return res.status(500).json({ 
-        error: 'Tracking failed', 
-        details: results.error 
+      // Update progress: Modal processing
+      analysisJobs.set(jobId, {
+        status: 'processing',
+        progress: 50,
+        message: 'Tracking player movements...',
+        startTime: analysisJobs.get(jobId).startTime
       });
-    }
 
-  console.log('✅ Analysis complete!');
-    console.log(`   Target player: ID ${results.target_player_id}`);
-    console.log(`   Decision points: ${results.decision_points?.length || 0}`);
-    
-    // Store completed results
-    analysisJobs.set(jobId, {
-      status: 'completed',
-      progress: 100,
-      message: 'Analysis complete!',
-      results: {
-        ...results,
-        video_url: videoUrl,
-        video_filename: req.file.filename
-      },
-      startTime: analysisJobs.get(jobId).startTime
-    });
+      if (!modalResponse.ok) {
+        const errorText = await modalResponse.text();
+        throw new Error(`Modal tracker error: ${errorText}`);
+      }
 
-} catch (error) {
+      const results = await modalResponse.json();
+      
+      console.log('✅ Analysis complete!');
+      console.log(`   Target player: ID ${results.target_player_id}`);
+      console.log(`   Decision points: ${results.decision_points?.length || 0}`);
+      
+      // Store completed results
+      analysisJobs.set(jobId, {
+        status: 'completed',
+        progress: 100,
+        message: 'Analysis complete!',
+        results: {
+          ...results,
+          video_url: videoUrl,
+          video_filename: req.file.filename
+        },
+        startTime: analysisJobs.get(jobId).startTime
+      });
+      
+    } catch (error) {
       console.error('❌ Analysis error:', error);
       
       // Store error status
       analysisJobs.set(jobId, {
         status: 'failed',
         progress: 0,
-        message: error.message,
+        message: error.message || 'Analysis failed',
         error: error.message,
-        startTime: analysisJobs.get(jobId).startTime
+        startTime: analysisJobs.get(jobId)?.startTime || Date.now()
       });
       
       // Clean up temp file on error
       if (req.file?.path) {
-        fs.unlink(req.file.path, () => {});
+        fs.unlink(req.file.path, (err) => {
+          if (err) console.error('Failed to delete temp file:', err);
+        });
       }
     }
   })();
