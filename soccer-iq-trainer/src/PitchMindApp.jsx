@@ -1932,22 +1932,41 @@ useEffect(() => {
     setUploadProgress(0);
     setError(null);
     try {
-      const formData = new FormData();
-      formData.append('video', videoFile);
-      formData.append('clickX', Math.round(clickPosition.x));
-      formData.append('clickY', Math.round(clickPosition.y));
-      formData.append('clickTimestamp', clickPosition.timestamp || 0);
-      if (trackedPlayer) {
-        formData.append('playerName', trackedPlayer.name);
-        formData.append('jerseyNumber', trackedPlayer.jerseyNumber || '');
-      }
-      const progressInterval = setInterval(() => { setUploadProgress(prev => prev >= 90 ? (clearInterval(progressInterval), 90) : prev + 10); }, 200);
-      setUploadState('analyzing');
-      const response = await fetch(`${API_BASE}/api/analyze`, { method: 'POST', body: formData });
-      clearInterval(progressInterval);
-      setUploadProgress(100);
-      if (!response.ok) throw new Error('Analysis failed');
-      const results = await response.json();
+// Start analysis
+const formData = new FormData();
+formData.append('video', videoFile);
+formData.append('clickX', clickX);
+formData.append('clickY', clickY);
+formData.append('clickTimestamp', clickTimestamp);
+
+const response = await fetch('/api/analyze', {
+  method: 'POST',
+  body: formData
+});
+
+const { jobId } = await response.json();
+
+// Poll for progress
+let pollInterval = setInterval(async () => {
+  const statusResponse = await fetch(`/api/analyze-status/${jobId}`);
+  const status = await statusResponse.json();
+  
+  // Update progress UI (you'll need state variables for this)
+  setProgress(status.progress);
+  setStatusMessage(status.message);
+  setElapsedTime(status.elapsed);
+  
+  if (status.status === 'completed') {
+    clearInterval(pollInterval);
+    // Handle completed results
+    const results = status.results;
+    // Your existing results handling code...
+  } else if (status.status === 'failed') {
+    clearInterval(pollInterval);
+    // Handle error
+    console.error('Analysis failed:', status.error);
+  }
+}, 2000); // Poll every 2 seconds
       setAnalysisResults(results);
       
       // Save to video library
