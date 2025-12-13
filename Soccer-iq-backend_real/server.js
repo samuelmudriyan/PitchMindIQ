@@ -295,7 +295,12 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
 });
-const upload = multer({ storage, limits: { fileSize: 2000 * 1024 * 1024 } });
+const upload = multer({
+  dest: 'uploads/',
+  limits: { 
+    fileSize: 2 * 1024 * 1024 * 1024 // 2GB limit (enough for 20-min videos)
+  }
+});
 
 // Health check
 app.get('/', (req, res) => {
