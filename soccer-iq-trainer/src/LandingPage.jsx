@@ -68,9 +68,9 @@ const DemoVideoWithTracking = () => {
       >
         {/* Using a temporary public demo URL - replace with your hosted video */}
         <source 
-          src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" 
-          type="video/mp4" 
-        />
+  src="https://pitchmind-backend-production-483d.up.railway.app/public/videos/demo.mp4" 
+  type="video/mp4" 
+/>
         Your browser does not support the video tag.
       </video>
       
