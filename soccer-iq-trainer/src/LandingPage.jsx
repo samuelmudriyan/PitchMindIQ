@@ -1,129 +1,50 @@
 import React, { useState, useEffect } from 'react';
 
 // Demo Video Component with Simulated Tracking
+// Real Video Demo Component with Actual Tracking
 const DemoVideoWithTracking = () => {
-  const canvasRef = React.useRef(null);
+  const videoRef = React.useRef(null);
   const [isPlaying, setIsPlaying] = React.useState(false);
-  const animationRef = React.useRef(null);
-  const frameRef = React.useRef(0);
+  const [currentTime, setCurrentTime] = React.useState(0);
 
-  // Simulated player positions (would come from real tracking data)
-  const simulatePlayerTracking = (frame) => {
-    // Main tracked player (moves across field)
-    const mainPlayer = {
-      x: 100 + Math.sin(frame * 0.02) * 200,
-      y: 150 + Math.cos(frame * 0.015) * 80,
-      w: 60,
-      h: 100,
-      isTarget: true,
-      number: 8,
+  React.useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const handleTimeUpdate = () => {
+      setCurrentTime(video.currentTime);
     };
 
-    // Other players (static-ish)
-    const otherPlayers = [
-      { x: 300, y: 120, w: 55, h: 95, number: 3 },
-      { x: 450, y: 200, w: 55, h: 95, number: 11 },
-      { x: 200, y: 280, w: 55, h: 95, number: 7 },
-      { x: 550, y: 140, w: 55, h: 95, number: 9 },
-    ];
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
 
-    return [mainPlayer, ...otherPlayers];
-  };
+    video.addEventListener('timeupdate', handleTimeUpdate);
+    video.addEventListener('play', handlePlay);
+    video.addEventListener('pause', handlePause);
 
-  const drawTracking = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    const width = canvas.width;
-    const height = canvas.height;
-
-    // Clear canvas
-    ctx.clearRect(0, 0, width, height);
-
-    // Draw simulated soccer field background
-    ctx.fillStyle = '#1a4d2e';
-    ctx.fillRect(0, 0, width, height);
-    
-    // Draw center line
-    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(width / 2, 0);
-    ctx.lineTo(width / 2, height);
-    ctx.stroke();
-
-    // Get player positions for current frame
-    const players = simulatePlayerTracking(frameRef.current);
-
-    // Draw each player
-    players.forEach(player => {
-      // Bounding box
-      ctx.strokeStyle = player.isTarget ? '#10b981' : '#3b82f6';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(player.x, player.y, player.w, player.h);
-
-      // Background for label
-      ctx.fillStyle = player.isTarget ? '#10b981' : '#3b82f6';
-      ctx.fillRect(player.x, player.y - 25, player.w, 25);
-
-      // Player number
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(`#${player.number}`, player.x + player.w / 2, player.y - 8);
-
-      // Tracking dot on target player
-      if (player.isTarget) {
-        ctx.fillStyle = '#10b981';
-        ctx.beginPath();
-        ctx.arc(player.x + player.w / 2, player.y + player.h / 2, 5, 0, Math.PI * 2);
-        ctx.fill();
-      }
+    // Auto-play when loaded (muted for browser policies)
+    video.play().catch(() => {
+      // Auto-play blocked, user will need to click play
+      console.log('Auto-play prevented');
     });
 
-    // Draw "Decision Point" marker at certain frames
-    if (frameRef.current % 120 < 60 && frameRef.current > 60) {
-      const mainPlayer = players[0];
-      ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
-      ctx.strokeStyle = '#f59e0b';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(mainPlayer.x + mainPlayer.w / 2, mainPlayer.y - 40, 20, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      
-      ctx.fillStyle = '#f59e0b';
-      ctx.font = 'bold 20px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('!', mainPlayer.x + mainPlayer.w / 2, mainPlayer.y - 33);
-    }
-
-    frameRef.current += 1;
-
-    if (isPlaying) {
-      animationRef.current = requestAnimationFrame(drawTracking);
-    }
-  };
-
-  React.useEffect(() => {
-    // Auto-start animation
-    setIsPlaying(true);
+    return () => {
+      video.removeEventListener('timeupdate', handleTimeUpdate);
+      video.removeEventListener('play', handlePlay);
+      video.removeEventListener('pause', handlePause);
+    };
   }, []);
 
-  React.useEffect(() => {
-    if (isPlaying) {
-      drawTracking();
-    } else if (animationRef.current) {
-      cancelAnimationFrame(animationRef.current);
-    }
+  const togglePlayPause = () => {
+    const video = videoRef.current;
+    if (!video) return;
 
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-    };
-  }, [isPlaying]);
+    if (isPlaying) {
+      video.pause();
+    } else {
+      video.play();
+    }
+  };
 
   return (
     <div style={{
@@ -132,24 +53,30 @@ const DemoVideoWithTracking = () => {
       left: 0,
       width: '100%',
       height: '100%',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
+      background: '#000',
     }}>
-      <canvas
-        ref={canvasRef}
-        width={800}
-        height={450}
+      <video
+        ref={videoRef}
+        loop
+        muted
+        playsInline
         style={{
           width: '100%',
           height: '100%',
           objectFit: 'contain',
         }}
-      />
+      >
+        {/* Using a temporary public demo URL - replace with your hosted video */}
+        <source 
+          src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" 
+          type="video/mp4" 
+        />
+        Your browser does not support the video tag.
+      </video>
       
       {/* Play/Pause overlay */}
       <button
-        onClick={() => setIsPlaying(!isPlaying)}
+        onClick={togglePlayPause}
         style={{
           position: 'absolute',
           bottom: '20px',
@@ -163,14 +90,41 @@ const DemoVideoWithTracking = () => {
           fontWeight: '600',
           cursor: 'pointer',
           transition: 'all 0.2s',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+        }}
+        onMouseOver={e => {
+          e.currentTarget.style.background = 'rgba(16, 185, 129, 1)';
+          e.currentTarget.style.transform = 'scale(1.05)';
+        }}
+        onMouseOut={e => {
+          e.currentTarget.style.background = 'rgba(16, 185, 129, 0.9)';
+          e.currentTarget.style.transform = 'scale(1)';
         }}
       >
+        <span style={{ fontSize: '16px' }}>{isPlaying ? '⏸' : '▶'}</span>
         {isPlaying ? 'Pause' : 'Play'} Demo
       </button>
+
+      {/* Time indicator */}
+      <div style={{
+        position: 'absolute',
+        bottom: '20px',
+        left: '20px',
+        background: 'rgba(0, 0, 0, 0.7)',
+        borderRadius: '8px',
+        padding: '8px 12px',
+        fontSize: '13px',
+        color: '#10b981',
+        fontFamily: 'monospace',
+        fontWeight: '600',
+      }}>
+        {Math.floor(currentTime)}s
+      </div>
     </div>
   );
 };
-
 // ============================================================================
 // PITCHMIND LANDING PAGE - Professional, Clean Design
 // ============================================================================
