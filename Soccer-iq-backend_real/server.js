@@ -12,6 +12,9 @@ const stripeRoutes = require('./stripe-api');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Job tracking for progress updates
+const analysisJobs = new Map();
+
 // Environment variables
 const MODAL_WEBHOOK_URL = process.env.MODAL_WEBHOOK_URL || 'https://pitchmind--pitchmind-production-tracker-track-webhook.modal.run/track';
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -798,8 +801,28 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
   console.log(`Video: ${req.file.filename}`);
   console.log(`Click: (${clickX}%, ${clickY}%) at ${clickTimestamp}s`);
 
-  try {
-    // Generate publicly accessible video URL
+  // Generate job ID for tracking progress
+  const jobId = Date.now().toString();
+  
+  // Initialize job status
+  analysisJobs.set(jobId, {
+    status: 'processing',
+    progress: 0,
+    message: 'Starting analysis...',
+    startTime: Date.now()
+  });
+
+  // Return job ID immediately so frontend can poll for progress
+  res.json({ 
+    jobId, 
+    status: 'processing',
+    message: 'Video analysis started. This may take 12-15 minutes for long videos.'
+  });
+
+  // Process video in background
+  (async () => {
+    try {
+    // Generate publicly accessible video URL with proper encoding
     const encodedFilename = encodeURIComponent(req.file.filename);
     const videoUrl = `${BACKEND_URL}/uploads/${encodedFilename}`;
     console.log(`📹 Video URL: ${videoUrl}`);
@@ -807,6 +830,14 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
     // Call Modal Custom Tracker
     console.log(`🚀 Calling Modal tracker: ${MODAL_WEBHOOK_URL}`);
     
+   // Update progress: calling Modal
+    analysisJobs.set(jobId, {
+      status: 'processing',
+      progress: 5,
+      message: 'Sending video to GPU tracker...',
+      startTime: analysisJobs.get(jobId).startTime
+    });
+
     const modalResponse = await fetch(MODAL_WEBHOOK_URL, {
       method: 'POST',
       headers: {
@@ -818,9 +849,16 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
         click_y: parseFloat(clickY) || 50.0,
         click_timestamp: parseFloat(clickTimestamp) || 0.0
       }),
-      timeout: 600000  // 10 minute timeout
+      timeout: 7200000  // 2 hour timeout for full highlights
     });
 
+    // Update progress: Modal processing
+    analysisJobs.set(jobId, {
+      status: 'processing',
+      progress: 50,
+      message: 'Tracking player movements...',
+      startTime: analysisJobs.get(jobId).startTime
+    });
     if (!modalResponse.ok) {
       const errorText = await modalResponse.text();
       console.error('❌ Modal error:', errorText);
@@ -851,32 +889,74 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
       });
     }
 
-    console.log('✅ Analysis complete!');
+  console.log('✅ Analysis complete!');
     console.log(`   Target player: ID ${results.target_player_id}`);
     console.log(`   Decision points: ${results.decision_points?.length || 0}`);
     
-    // Return results with video URL for frontend
-    res.json({
-      ...results,
-      video_url: videoUrl,
-      video_filename: req.file.filename
+    // Store completed results
+    analysisJobs.set(jobId, {
+      status: 'completed',
+      progress: 100,
+      message: 'Analysis complete!',
+      results: {
+        ...results,
+        video_url: videoUrl,
+        video_filename: req.file.filename
+      },
+      startTime: analysisJobs.get(jobId).startTime
     });
 
-  } catch (error) {
-    console.error('❌ Analysis error:', error);
-    
-    // Clean up temp file on error
-    if (req.file?.path) {
-      fs.unlink(req.file.path, () => {});
+} catch (error) {
+      console.error('❌ Analysis error:', error);
+      
+      // Store error status
+      analysisJobs.set(jobId, {
+        status: 'failed',
+        progress: 0,
+        message: error.message,
+        error: error.message,
+        startTime: analysisJobs.get(jobId).startTime
+      });
+      
+      // Clean up temp file on error
+      if (req.file?.path) {
+        fs.unlink(req.file.path, () => {});
+      }
     }
-    
-    res.status(500).json({ 
-      error: 'Analysis failed', 
-      message: error.message 
-    });
+  })();
+});
+// ============================================
+// ANALYSIS STATUS ENDPOINT (for progress polling)
+// ============================================
+app.get('/api/analyze-status/:jobId', (req, res) => {
+  const { jobId } = req.params;
+  const job = analysisJobs.get(jobId);
+  
+  if (!job) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+  
+  // Calculate elapsed time
+  const elapsedSeconds = Math.floor((Date.now() - job.startTime) / 1000);
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  const remainingSeconds = elapsedSeconds % 60;
+  
+  res.json({
+    ...job,
+    elapsed: `${elapsedMinutes}m ${remainingSeconds}s`
+  });
+  
+  // Clean up completed/failed jobs after 5 minutes
+  if (job.status === 'completed' || job.status === 'failed') {
+    setTimeout(() => {
+      analysisJobs.delete(jobId);
+    }, 300000);
   }
 });
 
+// ============================================
+// AI COACH ENDPOINT
+// ============================================
 // ============================================
 // AI COACH ENDPOINT
 // ============================================
