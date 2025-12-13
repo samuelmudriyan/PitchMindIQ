@@ -618,6 +618,9 @@ export default function PitchMindApp() {
   const [isPlayingClip, setIsPlayingClip] = useState(false);
   const [activeClipIndex, setActiveClipIndex] = useState(null);
   const clipTimeoutRef = useRef(null);
+  const [progress, setProgress] = useState(0);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [elapsedTime, setElapsedTime] = useState('');
 
   const [savedFormations, setSavedFormations] = useState(() => {
   if (user?.id) {
@@ -1928,10 +1931,86 @@ useEffect(() => {
   const startAnalysis = async () => {
     if (videoRef.current) videoRef.current.pause();
     if (!videoFile || !clickPosition) return;
+    
     setUploadState('uploading');
-    setUploadProgress(0);
+    setProgress(0);
+    setStatusMessage('Starting upload...');
     setError(null);
+    
     try {
+      const formData = new FormData();
+      formData.append('video', videoFile);
+      formData.append('clickX', String(clickPosition.x));
+      formData.append('clickY', String(clickPosition.y));
+      formData.append('clickTimestamp', String(clickPosition.timestamp));
+
+      const response = await fetch(`${API_BASE}/api/analyze`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${user.id}`
+        },
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error('Upload failed');
+      }
+
+      const { jobId } = await response.json();
+      
+      setUploadState('analyzing');
+      
+      // Poll for progress
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusResponse = await fetch(`${API_BASE}/api/analyze-status/${jobId}`);
+          const status = await statusResponse.json();
+          
+          setProgress(status.progress || 0);
+          setStatusMessage(status.message || 'Processing...');
+          setElapsedTime(status.elapsed || '0m 0s');
+          
+          if (status.status === 'completed') {
+            clearInterval(pollInterval);
+            const results = status.results;
+            
+            setAnalysisResults(results);
+            
+            // Save to video library
+            const newVideo = {
+              id: Date.now(),
+              title: videoFile.name.replace(/\.[^/.]+$/, ''),
+              date: new Date().toISOString().split('T')[0],
+              duration: videoRef.current ? formatTime(videoRef.current.duration) : '00:00',
+              decisions: results.decision_points?.length || 0,
+              playerName: trackedPlayer?.name,
+              playerId: trackedPlayer?.id,
+              jerseyNumber: trackedPlayer?.jerseyNumber,
+              jerseyColor: trackedPlayer?.jerseyColor
+            };
+            setVideos([newVideo, ...videos]);
+            
+            // Save analysis to player profile
+            if (trackedPlayer) {
+              saveAnalysisToPlayer(trackedPlayer.id, results, videoFile.name);
+            }
+            
+            setUploadState('complete');
+          } else if (status.status === 'failed') {
+            clearInterval(pollInterval);
+            setError(status.error || 'Analysis failed');
+            setUploadState('selecting');
+          }
+        } catch (err) {
+          console.error('Status poll error:', err);
+        }
+      }, 2000);
+      
+    } catch (err) {
+      setError(err.message || 'Something went wrong');
+      setUploadState('selecting');
+    }
+  };
 // Start analysis
 const formData = new FormData();
 formData.append('video', videoFile);
@@ -2030,12 +2109,52 @@ let pollInterval = setInterval(async () => {
           )}
 
           {['uploading', 'analyzing'].includes(uploadState) && (
-            <div className="bg-white/5 border border-white/10 rounded-3xl p-12 text-center">
-              <div className="inline-flex p-6 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 mb-6"><Loader2 className="w-12 h-12 text-emerald-400 animate-spin" /></div>
-              <h2 className="text-2xl font-bold text-white mb-2">{uploadState === 'uploading' ? 'Uploading...' : 'AI Analyzing...'}</h2>
-              {trackedPlayer && <p className="text-emerald-400 mb-2">Tracking: {trackedPlayer.name} (#{trackedPlayer.jerseyNumber || '?'})</p>}
-              <p className="text-gray-400 mb-8">{uploadState === 'uploading' ? 'Sending to GPU servers' : 'Identifying decision moments'}</p>
-              <div className="max-w-md mx-auto"><div className="h-2 bg-white/10 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full" style={{ width: `${uploadState === 'analyzing' ? 100 : uploadProgress}%` }} /></div></div>
+            <div className="bg-white/5 border border-white/10 rounded-3xl p-12">
+              <div className="text-center mb-8">
+                <div className="inline-flex p-6 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 mb-6">
+                  <Loader2 className="w-12 h-12 text-emerald-400 animate-spin" />
+                </div>
+                <h2 className="text-2xl font-bold text-white mb-2">
+                  {uploadState === 'uploading' ? 'Starting Analysis...' : 'Analyzing Video'}
+                </h2>
+                {trackedPlayer && (
+                  <p className="text-emerald-400 mb-2">
+                    Tracking: {trackedPlayer.name} (#{trackedPlayer.jerseyNumber || '?'})
+                  </p>
+                )}
+              </div>
+              
+              {/* Progress Bar */}
+              <div className="max-w-md mx-auto mb-6">
+                <div className="w-full bg-gray-200 rounded-full h-4 mb-4">
+                  <div 
+                    className="bg-emerald-600 h-4 rounded-full transition-all duration-300"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+                
+                {/* Progress Text */}
+                <p className="text-center text-lg font-semibold mb-2 text-white">
+                  {progress}% Complete
+                </p>
+                
+                {/* Status Message */}
+                <p className="text-center text-gray-400 mb-2">
+                  {statusMessage || 'Processing...'}
+                </p>
+                
+                {/* Elapsed Time */}
+                <p className="text-center text-sm text-gray-500">
+                  Elapsed: {elapsedTime || '0m 0s'}
+                </p>
+                
+                {/* Estimated Time for Long Videos */}
+                {progress < 10 && (
+                  <p className="text-center text-xs text-gray-400 mt-4">
+                    Long videos may take 12-15 minutes to process
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
