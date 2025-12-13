@@ -35,17 +35,19 @@ gpu_image = (
         "numpy<2.0.0",
         "supervision==0.22.0",
         "pillow",
-        "requests"
+        "requests",
+        "fastapi",
+        "uvicorn"
     )
 )
 
 @app.function(
     image=gpu_image,
     gpu="T4",
-    timeout=3600,
+    timeout=7200,  # 2 hours for full first-half highlights
     volumes={"/models": model_volume},
     memory=16384,
-    min_containers=0  # Updated from keep_warm=0
+    min_containers=0
 )
 def track_player(
     video_url: str,
@@ -55,6 +57,7 @@ def track_player(
 ) -> Dict:
     """
     Production tracker using ByteTrack + YOLO
+    Optimized for long videos (10-20 min highlights)
     
     Args:
         video_url: URL to video file
@@ -72,6 +75,9 @@ def track_player(
     import tempfile
     import urllib.request
     import os
+    
+    # OPTIMIZATION: Process every Nth frame for long videos
+    FRAME_SAMPLE_RATE = 10  # Process every 10th frame (10x faster)
     
     print(f"🎬 PitchMind Tracker Starting", file=sys.stderr)
     print(f"   Video URL: {video_url}", file=sys.stderr)
@@ -191,6 +197,12 @@ def track_player(
             if progress >= last_progress + 10:
                 print(f"  Progress: {progress}%", file=sys.stderr)
                 last_progress = progress
+            
+            # OPTIMIZATION: Skip frames for faster processing of long videos
+            # Process every 10th frame instead of every frame (10x speedup)
+            if frame_idx % FRAME_SAMPLE_RATE != 0:
+                frame_idx += 1
+                continue
             
             # Skip replays
             replay_flag, prev_hist = is_replay(frame, prev_hist)
