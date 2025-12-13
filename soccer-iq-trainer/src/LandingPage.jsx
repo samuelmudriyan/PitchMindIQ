@@ -1,5 +1,176 @@
 import React, { useState, useEffect } from 'react';
 
+// Demo Video Component with Simulated Tracking
+const DemoVideoWithTracking = () => {
+  const canvasRef = React.useRef(null);
+  const [isPlaying, setIsPlaying] = React.useState(false);
+  const animationRef = React.useRef(null);
+  const frameRef = React.useRef(0);
+
+  // Simulated player positions (would come from real tracking data)
+  const simulatePlayerTracking = (frame) => {
+    // Main tracked player (moves across field)
+    const mainPlayer = {
+      x: 100 + Math.sin(frame * 0.02) * 200,
+      y: 150 + Math.cos(frame * 0.015) * 80,
+      w: 60,
+      h: 100,
+      isTarget: true,
+      number: 8,
+    };
+
+    // Other players (static-ish)
+    const otherPlayers = [
+      { x: 300, y: 120, w: 55, h: 95, number: 3 },
+      { x: 450, y: 200, w: 55, h: 95, number: 11 },
+      { x: 200, y: 280, w: 55, h: 95, number: 7 },
+      { x: 550, y: 140, w: 55, h: 95, number: 9 },
+    ];
+
+    return [mainPlayer, ...otherPlayers];
+  };
+
+  const drawTracking = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+
+    // Draw simulated soccer field background
+    ctx.fillStyle = '#1a4d2e';
+    ctx.fillRect(0, 0, width, height);
+    
+    // Draw center line
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(width / 2, 0);
+    ctx.lineTo(width / 2, height);
+    ctx.stroke();
+
+    // Get player positions for current frame
+    const players = simulatePlayerTracking(frameRef.current);
+
+    // Draw each player
+    players.forEach(player => {
+      // Bounding box
+      ctx.strokeStyle = player.isTarget ? '#10b981' : '#3b82f6';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(player.x, player.y, player.w, player.h);
+
+      // Background for label
+      ctx.fillStyle = player.isTarget ? '#10b981' : '#3b82f6';
+      ctx.fillRect(player.x, player.y - 25, player.w, 25);
+
+      // Player number
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`#${player.number}`, player.x + player.w / 2, player.y - 8);
+
+      // Tracking dot on target player
+      if (player.isTarget) {
+        ctx.fillStyle = '#10b981';
+        ctx.beginPath();
+        ctx.arc(player.x + player.w / 2, player.y + player.h / 2, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+
+    // Draw "Decision Point" marker at certain frames
+    if (frameRef.current % 120 < 60 && frameRef.current > 60) {
+      const mainPlayer = players[0];
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(mainPlayer.x + mainPlayer.w / 2, mainPlayer.y - 40, 20, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = 'bold 20px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('!', mainPlayer.x + mainPlayer.w / 2, mainPlayer.y - 33);
+    }
+
+    frameRef.current += 1;
+
+    if (isPlaying) {
+      animationRef.current = requestAnimationFrame(drawTracking);
+    }
+  };
+
+  React.useEffect(() => {
+    // Auto-start animation
+    setIsPlaying(true);
+  }, []);
+
+  React.useEffect(() => {
+    if (isPlaying) {
+      drawTracking();
+    } else if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+    }
+
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [isPlaying]);
+
+  return (
+    <div style={{
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    }}>
+      <canvas
+        ref={canvasRef}
+        width={800}
+        height={450}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'contain',
+        }}
+      />
+      
+      {/* Play/Pause overlay */}
+      <button
+        onClick={() => setIsPlaying(!isPlaying)}
+        style={{
+          position: 'absolute',
+          bottom: '20px',
+          right: '20px',
+          background: 'rgba(16, 185, 129, 0.9)',
+          border: 'none',
+          borderRadius: '8px',
+          color: '#fff',
+          padding: '10px 20px',
+          fontSize: '14px',
+          fontWeight: '600',
+          cursor: 'pointer',
+          transition: 'all 0.2s',
+        }}
+      >
+        {isPlaying ? 'Pause' : 'Play'} Demo
+      </button>
+    </div>
+  );
+};
+
 // ============================================================================
 // PITCHMIND LANDING PAGE - Professional, Clean Design
 // ============================================================================
@@ -726,7 +897,131 @@ const LandingPage = ({ onGetStarted, onLogin, onSelectPlan, isSignedIn, logoUrl 
           </div>
         </div>
       </section>
+{/* Live Demo Section - Tracking Visualization */}
+<section style={{
+  padding: '120px 48px',
+  background: 'linear-gradient(180deg, #0a0e0d 0%, #0d1210 100%)',
+  position: 'relative',
+  overflow: 'hidden',
+}}>
+  <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+    <div style={{ textAlign: 'center', marginBottom: '64px' }}>
+      <p style={{ 
+        color: '#10b981', 
+        fontSize: '13px', 
+        fontWeight: '600', 
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase',
+        marginBottom: '16px',
+      }}>
+        Live Demo
+      </p>
+      <h2 style={{
+        fontSize: 'clamp(32px, 4vw, 48px)',
+        fontWeight: '700',
+        letterSpacing: '-0.02em',
+        marginBottom: '16px',
+      }}>
+        See <span className="gradient-text">AI Tracking</span> in Action
+      </h2>
+      <p style={{
+        fontSize: '16px',
+        color: '#94a3b8',
+        maxWidth: '600px',
+        margin: '0 auto',
+      }}>
+        Watch how our AI automatically tracks player movement and identifies decision points
+      </p>
+    </div>
 
+    {/* Video Demo Container */}
+    <div style={{
+      maxWidth: '900px',
+      margin: '0 auto',
+      position: 'relative',
+      borderRadius: '16px',
+      overflow: 'hidden',
+      boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+      border: '1px solid rgba(255,255,255,0.1)',
+    }}>
+      {/* Placeholder for demo - replace with actual video */}
+      <div style={{
+        position: 'relative',
+        paddingBottom: '56.25%', // 16:9 aspect ratio
+        background: 'linear-gradient(135deg, #1a1f1e 0%, #0d1210 100%)',
+      }}>
+        <DemoVideoWithTracking />
+      </div>
+
+      {/* Demo Controls/Info */}
+      <div style={{
+        padding: '20px 24px',
+        background: 'rgba(16, 185, 129, 0.05)',
+        borderTop: '1px solid rgba(16, 185, 129, 0.1)',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{
+            width: '8px',
+            height: '8px',
+            background: '#10b981',
+            borderRadius: '50%',
+            animation: 'float 2s ease-in-out infinite',
+          }} />
+          <span style={{ color: '#10b981', fontSize: '14px', fontWeight: '500' }}>
+            AI Tracking Active
+          </span>
+        </div>
+        <div style={{ 
+          display: 'flex', 
+          gap: '20px',
+          fontSize: '13px',
+          color: '#94a3b8',
+        }}>
+          <span>
+            <strong style={{ color: '#10b981' }}>12</strong> Players Detected
+          </span>
+          <span>
+            <strong style={{ color: '#10b981' }}>3</strong> Decision Points
+          </span>
+        </div>
+      </div>
+    </div>
+
+    {/* Feature highlights below demo */}
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(3, 1fr)',
+      gap: '20px',
+      maxWidth: '900px',
+      margin: '40px auto 0',
+    }}>
+      {[
+        { icon: '🎯', label: 'Real-time player tracking', color: '#10b981' },
+        { icon: '📊', label: 'Automatic decision detection', color: '#3b82f6' },
+        { icon: '⚡', label: 'Instant AI analysis', color: '#f59e0b' },
+      ].map((item, i) => (
+        <div
+          key={i}
+          style={{
+            padding: '16px',
+            background: 'rgba(255,255,255,0.02)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            borderRadius: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+          }}
+        >
+          <span style={{ fontSize: '24px' }}>{item.icon}</span>
+          <span style={{ fontSize: '14px', color: '#94a3b8' }}>{item.label}</span>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
       {/* Pricing Section */}
       <section id="pricing" style={{
         padding: '120px 48px',
