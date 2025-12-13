@@ -1929,150 +1929,88 @@ useEffect(() => {
   };
   
   const startAnalysis = async () => {
-    if (videoRef.current) videoRef.current.pause();
-    if (!videoFile || !clickPosition) return;
+  if (videoRef.current) videoRef.current.pause();
+  if (!videoFile || !clickPosition) return;
+  
+  setUploadState('uploading');
+  setProgress(0);
+  setStatusMessage('Starting upload...');
+  setError(null);
+  
+  try {
+    const formData = new FormData();
+    formData.append('video', videoFile);
+    formData.append('clickX', String(clickPosition.x));
+    formData.append('clickY', String(clickPosition.y));
+    formData.append('clickTimestamp', String(clickPosition.timestamp));
+
+    const response = await fetch(`${API_BASE}/api/analyze`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${user.id}`
+      },
+      body: formData
+    });
+
+    if (!response.ok) {
+      throw new Error('Upload failed');
+    }
+
+    const { jobId } = await response.json();
     
-    setUploadState('uploading');
-    setProgress(0);
-    setStatusMessage('Starting upload...');
-    setError(null);
+    setUploadState('analyzing');
     
-    try {
-      const formData = new FormData();
-      formData.append('video', videoFile);
-      formData.append('clickX', String(clickPosition.x));
-      formData.append('clickY', String(clickPosition.y));
-      formData.append('clickTimestamp', String(clickPosition.timestamp));
-
-      const response = await fetch(`${API_BASE}/api/analyze`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${user.id}`
-        },
-        body: formData
-      });
-
-      if (!response.ok) {
-        throw new Error('Upload failed');
-      }
-
-      const { jobId } = await response.json();
-      
-      setUploadState('analyzing');
-      
-      // Poll for progress
-      const pollInterval = setInterval(async () => {
-        try {
-          const statusResponse = await fetch(`${API_BASE}/api/analyze-status/${jobId}`);
-          const status = await statusResponse.json();
+    // Poll for progress
+    const pollInterval = setInterval(async () => {
+      try {
+        const statusResponse = await fetch(`${API_BASE}/api/analyze-status/${jobId}`);
+        const status = await statusResponse.json();
+        
+        setProgress(status.progress || 0);
+        setStatusMessage(status.message || 'Processing...');
+        setElapsedTime(status.elapsed || '0m 0s');
+        
+        if (status.status === 'completed') {
+          clearInterval(pollInterval);
+          const results = status.results;
           
-          setProgress(status.progress || 0);
-          setStatusMessage(status.message || 'Processing...');
-          setElapsedTime(status.elapsed || '0m 0s');
+          setAnalysisResults(results);
           
-          if (status.status === 'completed') {
-            clearInterval(pollInterval);
-            const results = status.results;
-            
-            setAnalysisResults(results);
-            
-            // Save to video library
-            const newVideo = {
-              id: Date.now(),
-              title: videoFile.name.replace(/\.[^/.]+$/, ''),
-              date: new Date().toISOString().split('T')[0],
-              duration: videoRef.current ? formatTime(videoRef.current.duration) : '00:00',
-              decisions: results.decision_points?.length || 0,
-              playerName: trackedPlayer?.name,
-              playerId: trackedPlayer?.id,
-              jerseyNumber: trackedPlayer?.jerseyNumber,
-              jerseyColor: trackedPlayer?.jerseyColor
-            };
-            setVideos([newVideo, ...videos]);
-            
-            // Save analysis to player profile
-            if (trackedPlayer) {
-              saveAnalysisToPlayer(trackedPlayer.id, results, videoFile.name);
-            }
-            
-            setUploadState('complete');
-          } else if (status.status === 'failed') {
-            clearInterval(pollInterval);
-            setError(status.error || 'Analysis failed');
-            setUploadState('selecting');
+          // Save to video library
+          const newVideo = {
+            id: Date.now(),
+            title: videoFile.name.replace(/\.[^/.]+$/, ''),
+            date: new Date().toISOString().split('T')[0],
+            duration: videoRef.current ? formatTime(videoRef.current.duration) : '00:00',
+            decisions: results.decision_points?.length || 0,
+            playerName: trackedPlayer?.name,
+            playerId: trackedPlayer?.id,
+            jerseyNumber: trackedPlayer?.jerseyNumber,
+            jerseyColor: trackedPlayer?.jerseyColor
+          };
+          setVideos([newVideo, ...videos]);
+          
+          // Save analysis to player profile
+          if (trackedPlayer) {
+            saveAnalysisToPlayer(trackedPlayer.id, results, videoFile.name);
           }
-        } catch (err) {
-          console.error('Status poll error:', err);
+          
+          setUploadState('complete');
+        } else if (status.status === 'failed') {
+          clearInterval(pollInterval);
+          setError(status.error || 'Analysis failed');
+          setUploadState('selecting');
         }
-      }, 2000);
-      
-    } catch (err) {
-      setError(err.message || 'Something went wrong');
-      setUploadState('selecting');
-    }
-  };
-// Start analysis
-const formData = new FormData();
-formData.append('video', videoFile);
-formData.append('clickX', clickX);
-formData.append('clickY', clickY);
-formData.append('clickTimestamp', clickTimestamp);
-
-const response = await fetch('/api/analyze', {
-  method: 'POST',
-  body: formData
-});
-
-const { jobId } = await response.json();
-
-// Poll for progress
-let pollInterval = setInterval(async () => {
-  const statusResponse = await fetch(`/api/analyze-status/${jobId}`);
-  const status = await statusResponse.json();
-  
-  // Update progress UI (you'll need state variables for this)
-  setProgress(status.progress);
-  setStatusMessage(status.message);
-  setElapsedTime(status.elapsed);
-  
-  if (status.status === 'completed') {
-    clearInterval(pollInterval);
-    // Handle completed results
-    const results = status.results;
-    // Your existing results handling code...
-  } else if (status.status === 'failed') {
-    clearInterval(pollInterval);
-    // Handle error
-    console.error('Analysis failed:', status.error);
-  }
-}, 2000); // Poll every 2 seconds
-      setAnalysisResults(results);
-      
-      // Save to video library
-      const newVideo = {
-        id: Date.now(),
-        title: videoFile.name.replace(/\.[^/.]+$/, ''),
-        date: new Date().toISOString().split('T')[0],
-        duration: videoRef.current ? formatTime(videoRef.current.duration) : '00:00',
-        decisions: results.decision_points?.length || 0,
-        playerName: trackedPlayer?.name,
-        playerId: trackedPlayer?.id,
-        jerseyNumber: trackedPlayer?.jerseyNumber,
-        jerseyColor: trackedPlayer?.jerseyColor
-      };
-      setVideos([newVideo, ...videos]);
-      
-      // Save analysis to player profile
-      if (trackedPlayer) {
-        saveAnalysisToPlayer(trackedPlayer.id, results, videoFile.name);
+      } catch (err) {
+        console.error('Status poll error:', err);
       }
-      
-      setUploadState('complete');
-    } catch (err) {
-      setError(err.message || 'Something went wrong');
-      setUploadState('selecting');
-    }
-  };
+    }, 2000);
+    
+  } catch (err) {
+    setError(err.message || 'Something went wrong');
+    setUploadState('selecting');
+  }
+};
 
   const UploadPage = () => (
     <div className={`pt-16 min-h-screen bg-[#0a0f0d] transition-all duration-300 ${sidebarCollapsed ? 'ml-20' : 'ml-64'}`}>
