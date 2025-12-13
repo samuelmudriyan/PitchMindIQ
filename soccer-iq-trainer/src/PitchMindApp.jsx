@@ -1907,14 +1907,15 @@ useEffect(() => {
     }
   };
   
+  
   const handleVideoClick = (e) => {
-    if (uploadState !== 'selecting') return;
-    const video = videoRef.current;
-    const rect = video.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * video.videoWidth;
-    const y = ((e.clientY - rect.top) / rect.height) * video.videoHeight;
-    setClickPosition({ x, y, timestamp: video.currentTime, displayX: e.clientX - rect.left, displayY: e.clientY - rect.top });
-  };
+  const rect = e.target.getBoundingClientRect();
+  const x = ((e.clientX - rect.left) / rect.width) * 100;  // 0-100%
+  const y = ((e.clientY - rect.top) / rect.height) * 100;  // 0-100%
+  const timestamp = videoRef.current.currentTime;
+  
+  setClickPosition({ x, y, timestamp });
+};
   
   const resetUpload = () => {
     setUploadState('idle');
