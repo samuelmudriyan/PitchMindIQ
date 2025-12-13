@@ -68,7 +68,7 @@ const DemoVideoWithTracking = () => {
       >
         {/* Using a temporary public demo URL - replace with your hosted video */}
         <source 
-  src="https://pitchmind-backend-production-483d.up.railway.app/public/videos/demo.mp4" 
+  src="https://res.cloudinary.com/dpj4qupyk/video/upload/v1765608000/demo_ve9du6.mp4" 
   type="video/mp4" 
 />
         Your browser does not support the video tag.
