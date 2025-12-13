@@ -31,6 +31,10 @@ const TEAMSNAP_API = 'https://api.teamsnap.com/v3';
 const TEAMSNAP_AUTH = 'https://auth.teamsnap.com/oauth/authorize';
 const TEAMSNAP_TOKEN = 'https://auth.teamsnap.com/oauth/token';
 
+
+app.use('/public', express.static('public'));
+
+
 // ============================================
 // DATABASE SETUP
 // ============================================
