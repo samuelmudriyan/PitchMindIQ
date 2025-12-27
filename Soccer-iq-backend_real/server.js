@@ -877,8 +877,14 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
       const results = await modalResponse.json();
       
       console.log('✅ Analysis complete!');
-      console.log(`   Target player: ID ${results.target_player_id}`);
+      // Support both old and new response formats
+      const targetPlayerId = results.target_permanent_id || results.target_player_id || results.processing_info?.target_permanent_id;
+      console.log(`   Target player: Permanent ID ${targetPlayerId}`);
       console.log(`   Decision points: ${results.decision_points?.length || 0}`);
+      if (results.player_analytics) {
+        console.log(`   Distance traveled: ${results.player_analytics.distance_traveled}px`);
+        console.log(`   Average speed: ${results.player_analytics.average_speed} px/s`);
+      }
       
       // Store completed results
       analysisJobs.set(jobId, {
