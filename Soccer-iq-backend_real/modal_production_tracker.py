@@ -132,7 +132,8 @@ def track_player(
         ROI_BOTTOM = 670
         GREEN_RATIO_THRESHOLD = 0.25
         HIST_DIFF_THRESHOLD = 0.4
-        BALL_PROXIMITY_THRESHOLD = 100
+        BALL_PROXIMITY_THRESHOLD = 150  # Increased from 100 to catch more interactions
+        BALL_CONFIDENCE_THRESHOLD = 0.2  # Lower threshold for ball detection (balls are small)
         
         # Helper: Detect replays
         def is_replay(frame, prev_hist):
@@ -182,6 +183,8 @@ def track_player(
         prev_hist = None
         frame_idx = 0
         last_progress = 0
+        total_ball_detections = 0
+        total_player_frames = 0
         
         # Process video
         print(f"🔄 Processing video...", file=sys.stderr)
@@ -211,8 +214,8 @@ def track_player(
             # ROI crop
             roi = frame[ROI_TOP:ROI_BOTTOM, :]
             
-            # YOLO detection
-            results = model.predict(roi, verbose=False, conf=0.3)
+            # YOLO detection - use lower confidence for balls
+            results = model.predict(roi, verbose=False, conf=0.25)
             
             # Parse detections
             person_boxes, person_confs = [], []
@@ -225,12 +228,13 @@ def track_player(
                     cls = int(boxes.cls[i].cpu().numpy())
                     conf = float(boxes.conf[i].cpu().numpy())
                     
-                    if cls == 0:
+                    if cls == 0:  # Person
                         person_boxes.append(box)
                         person_confs.append(conf)
-                    elif cls == 32:
-                        ball_boxes.append(box)
-                        ball_confs.append(conf)
+                    elif cls == 32:  # Sports ball - use lower confidence threshold
+                        if conf >= BALL_CONFIDENCE_THRESHOLD:
+                            ball_boxes.append(box)
+                            ball_confs.append(conf)
             
             # Convert to Supervision format
             person_detections = sv.Detections(
@@ -282,6 +286,7 @@ def track_player(
                         center_x = (bbox[0] + bbox[2]) / 2
                         center_y = (bbox[1] + bbox[3]) / 2
                         target_player_pos = (center_x, center_y)
+                        total_player_frames += 1
                         
                         player_tracks.append({
                             'frame': frame_idx,
@@ -292,6 +297,10 @@ def track_player(
                             },
                             'bbox': [float(x) for x in bbox]
                         })
+            
+            # Track ball detections for debugging
+            if len(ball_detections) > 0:
+                total_ball_detections += 1
             
             # Decision point detection
             if target_player_pos is not None and len(ball_detections) > 0:
@@ -344,7 +353,41 @@ def track_player(
         
         print(f"✅ Tracking complete!", file=sys.stderr)
         print(f"   Target player: ID {target_player_id}", file=sys.stderr)
+        print(f"   Player tracked in {total_player_frames} frames", file=sys.stderr)
+        print(f"   Ball detected in {total_ball_detections} frames", file=sys.stderr)
         print(f"   Decision points: {len(decision_points)}", file=sys.stderr)
+        
+        # If no decision points but player was tracked, add fallback points based on player movement
+        if len(decision_points) == 0 and len(player_tracks) > 10:
+            print(f"⚠️  No ball-based decision points found. Adding movement-based points...", file=sys.stderr)
+            # Add decision points based on significant player movements
+            third = (ROI_BOTTOM - ROI_TOP) / 3
+            for i in range(10, len(player_tracks), max(1, len(player_tracks) // 5)):
+                track = player_tracks[i]
+                y_pos = track['position']['y']
+                
+                # Determine field third based on player position in ROI
+                if y_pos < third:
+                    field_third = "Attacking Third"
+                elif y_pos < third * 2:
+                    field_third = "Middle Third"
+                else:
+                    field_third = "Defensive Third"
+                
+                decision_points.append({
+                    'timestamp': track['timestamp'],
+                    'frame': track['frame'],
+                    'player_position': {
+                        'x': round((track['position']['x'] / width) * 100, 1),
+                        'y': round(((track['position']['y'] + ROI_TOP) / height) * 100, 1)
+                    },
+                    'field_third': field_third,
+                    'ball_distance': None,
+                    'clip_start': max(0, track['timestamp'] - 5),
+                    'clip_end': min(duration, track['timestamp'] + 10),
+                    'type': 'movement'  # Indicate this is movement-based, not ball-based
+                })
+            print(f"   Added {len(decision_points)} movement-based decision points", file=sys.stderr)
         
         return {
             'success': True,
