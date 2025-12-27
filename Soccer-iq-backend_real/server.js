@@ -847,55 +847,73 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
       // Call Modal Custom Tracker
       console.log(`🚀 Calling Modal tracker: ${MODAL_WEBHOOK_URL}`);
       
-      const modalResponse = await fetch(MODAL_WEBHOOK_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          video_url: videoUrl,
-          click_x: parseFloat(clickX) || 50.0,
-          click_y: parseFloat(clickY) || 50.0,
-          click_timestamp: parseFloat(clickTimestamp) || 0.0
-        }),
-        timeout: 7200000  // 2 hour timeout for full highlights
-      });
+      // Use AbortController for proper timeout handling
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 7200000); // 2 hours
+      
+      try {
+        const modalResponse = await fetch(MODAL_WEBHOOK_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            video_url: videoUrl,
+            click_x: parseFloat(clickX) || 50.0,
+            click_y: parseFloat(clickY) || 50.0,
+            click_timestamp: parseFloat(clickTimestamp) || 0.0
+          }),
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!modalResponse.ok) {
+          const errorText = await modalResponse.text();
+          throw new Error(`Modal tracker error: ${errorText}`);
+        }
+        
+        const results = await modalResponse.json();
+        
+        console.log('✅ Analysis complete!');
+        // Support both old and new response formats
+        const targetPlayerId = results.target_permanent_id || results.target_player_id || results.processing_info?.target_permanent_id;
+        console.log(`   Target player: Permanent ID ${targetPlayerId}`);
+        console.log(`   Decision points: ${results.decision_points?.length || 0}`);
+        if (results.player_analytics) {
+          console.log(`   Distance traveled: ${results.player_analytics.distance_traveled}px`);
+          console.log(`   Average speed: ${results.player_analytics.average_speed} px/s`);
+        }
+        
+        // Store completed results
+        analysisJobs.set(jobId, {
+          status: 'completed',
+          progress: 100,
+          message: 'Analysis complete!',
+          results: {
+            ...results,
+            video_url: videoUrl,
+            video_filename: req.file.filename
+          },
+          startTime: analysisJobs.get(jobId).startTime
+        });
+        
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        
+        // Check if it was aborted (timeout or cancellation)
+        if (fetchError.name === 'AbortError' || fetchError.message?.includes('cancel')) {
+          throw new Error('Analysis was canceled or timed out. This may happen with very long videos. Try a shorter clip or contact support.');
+        }
+        
+        throw fetchError;
+      }
 
       // Update progress: Modal processing
       analysisJobs.set(jobId, {
         status: 'processing',
         progress: 50,
         message: 'Tracking player movements...',
-        startTime: analysisJobs.get(jobId).startTime
-      });
-
-      if (!modalResponse.ok) {
-        const errorText = await modalResponse.text();
-        throw new Error(`Modal tracker error: ${errorText}`);
-      }
-
-      const results = await modalResponse.json();
-      
-      console.log('✅ Analysis complete!');
-      // Support both old and new response formats
-      const targetPlayerId = results.target_permanent_id || results.target_player_id || results.processing_info?.target_permanent_id;
-      console.log(`   Target player: Permanent ID ${targetPlayerId}`);
-      console.log(`   Decision points: ${results.decision_points?.length || 0}`);
-      if (results.player_analytics) {
-        console.log(`   Distance traveled: ${results.player_analytics.distance_traveled}px`);
-        console.log(`   Average speed: ${results.player_analytics.average_speed} px/s`);
-      }
-      
-      // Store completed results
-      analysisJobs.set(jobId, {
-        status: 'completed',
-        progress: 100,
-        message: 'Analysis complete!',
-        results: {
-          ...results,
-          video_url: videoUrl,
-          video_filename: req.file.filename
-        },
         startTime: analysisJobs.get(jobId).startTime
       });
       
