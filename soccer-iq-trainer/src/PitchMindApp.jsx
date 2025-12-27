@@ -1909,13 +1909,78 @@ useEffect(() => {
   
   
   const handleVideoClick = (e) => {
-  const rect = e.target.getBoundingClientRect();
-  const x = ((e.clientX - rect.left) / rect.width) * 100;  // 0-100%
-  const y = ((e.clientY - rect.top) / rect.height) * 100;  // 0-100%
-  const timestamp = videoRef.current.currentTime;
-  
-  setClickPosition({ x, y, timestamp });
-};
+    // Get the video element directly (always use videoRef, not e.target)
+    const video = videoRef.current;
+    if (!video) return;
+    
+    // Get the video's bounding rectangle (displayed size)
+    const rect = video.getBoundingClientRect();
+    
+    // Get click coordinates relative to the displayed video element
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+    
+    // Check if click is on video controls (bottom ~50px is typically controls)
+    const controlsHeight = 50; // Approximate height of video controls
+    if (clickY > rect.height - controlsHeight) {
+      // Click is likely on controls, ignore it
+      return;
+    }
+    
+    // Get video's natural dimensions (actual video resolution)
+    const videoWidth = video.videoWidth || 1;
+    const videoHeight = video.videoHeight || 1;
+    
+    // Get displayed dimensions
+    const displayWidth = rect.width;
+    const displayHeight = rect.height;
+    
+    // Calculate aspect ratios
+    const videoAspect = videoWidth / videoHeight;
+    const displayAspect = displayWidth / displayHeight;
+    
+    // Calculate actual video area being displayed (accounting for letterboxing/pillarboxing)
+    let actualDisplayWidth = displayWidth;
+    let actualDisplayHeight = displayHeight;
+    let offsetX = 0;
+    let offsetY = 0;
+    
+    if (displayAspect > videoAspect) {
+      // Letterboxing (black bars on top/bottom)
+      actualDisplayHeight = displayWidth / videoAspect;
+      offsetY = (displayHeight - actualDisplayHeight) / 2;
+    } else {
+      // Pillarboxing (black bars on left/right)
+      actualDisplayWidth = displayHeight * videoAspect;
+      offsetX = (displayWidth - actualDisplayWidth) / 2;
+    }
+    
+    // Adjust click coordinates to account for letterboxing/pillarboxing
+    const adjustedClickX = clickX - offsetX;
+    const adjustedClickY = clickY - offsetY;
+    
+    // Calculate percentage coordinates relative to actual video dimensions (for backend)
+    const x = (adjustedClickX / actualDisplayWidth) * 100;  // 0-100%
+    const y = (adjustedClickY / actualDisplayHeight) * 100;  // 0-100%
+    
+    // Clamp to valid range (0-100%)
+    const clampedX = Math.max(0, Math.min(100, x));
+    const clampedY = Math.max(0, Math.min(100, y));
+    
+    // Display coordinates for the visual marker (relative to displayed video)
+    const displayX = clickX;
+    const displayY = clickY;
+    
+    const timestamp = video.currentTime;
+    
+    setClickPosition({ 
+      x: clampedX, 
+      y: clampedY, 
+      timestamp,
+      displayX,
+      displayY
+    });
+  };
   
   const resetUpload = () => {
     setUploadState('idle');
