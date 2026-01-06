@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3001;
 const analysisJobs = new Map();
 
 // Environment variables
-const MODAL_WEBHOOK_URL = process.env.MODAL_WEBHOOK_URL || 'https://pitchmind--pitchmind-production-tracker-track-webhook.modal.run/track';
+const MODAL_WEBHOOK_URL = process.env.MODAL_WEBHOOK_URL || 'https://pitchmind--pitchmind-gpu-tracker-v7-fastapi-app.modal.run';
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const DATABASE_URL = process.env.DATABASE_URL;
 const BACKEND_URL = process.env.BACKEND_URL || 'https://pitchmind-backend-production-483d.up.railway.app';
