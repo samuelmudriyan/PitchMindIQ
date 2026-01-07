@@ -237,7 +237,7 @@ if (!fs.existsSync(uploadsDir)) {
 app.use('/uploads', express.static(uploadsDir));
 
 // ============================================
-// STRIPE ROUTES - FIXED: Only mount at /api/stripe
+// STRIPE ROUTES - Mount at /api/stripe first
 // ============================================
 app.use('/api/stripe', stripeRoutes);
 
@@ -1133,6 +1133,13 @@ app.get('/api/teamsnap/roster/:teamId', async (req, res) => {
 app.get('/api/teamsnap/status', (req, res) => {
   res.json({ configured: !!TEAMSNAP_CLIENT_ID, redirectUri: TEAMSNAP_REDIRECT_URI });
 });
+
+// ============================================
+// MOUNT STRIPE ROUTES GLOBALLY (AFTER ALL OTHER /api ROUTES)
+// This allows Stripe endpoints like /api/subscription-status to work
+// but /api/analyze is registered first so it doesn't get overridden
+// ============================================
+app.use('/api', stripeRoutes);
 
 // Start server
 app.listen(PORT, () => {
