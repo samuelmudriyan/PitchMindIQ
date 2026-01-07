@@ -874,6 +874,10 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
         }
         
         const results = await modalResponse.json();
+
+        if (!results.success) {
+  throw new Error(results.error || 'Modal tracking failed');
+}
         
         console.log('✅ Analysis complete!');
         // Support both old and new response formats
