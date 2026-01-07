@@ -302,7 +302,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   dest: 'uploads/',
   limits: { 
-    fileSize: 2 * 1024 * 1024 * 1024 // 2GB limit (enough for 20-min videos)
+    fileSize: 2 * 1024 * 1024 * 1024 // 2GB limit
   }
 });
 
@@ -795,7 +795,7 @@ app.get('/api/sync', authMiddleware, async (req, res) => {
 });
 
 // ============================================
-// VIDEO ANALYSIS ENDPOINT - UPDATED FOR CUSTOM TRACKER
+// VIDEO ANALYSIS ENDPOINT - FIXED ERROR HANDLING
 // ============================================
 app.post('/api/analyze', upload.single('video'), async (req, res) => {
   console.log('========================================');
@@ -825,18 +825,18 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
   res.json({ 
     jobId, 
     status: 'processing',
-    message: 'Video analysis started. This may take 12-15 minutes for long videos.'
+    message: 'Video analysis started. This may take 2-5 minutes.'
   });
 
-  // Process video in background (DO NOT USE res AFTER THIS POINT)
+  // Process video in background
   (async () => {
     try {
-      // Generate publicly accessible video URL with proper encoding
+      // Generate publicly accessible video URL
       const encodedFilename = encodeURIComponent(req.file.filename);
       const videoUrl = `${BACKEND_URL}/uploads/${encodedFilename}`;
       console.log(`📹 Video URL: ${videoUrl}`);
       
-      // Update progress: calling Modal
+      // Update progress
       analysisJobs.set(jobId, {
         status: 'processing',
         progress: 5,
@@ -844,19 +844,16 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
         startTime: analysisJobs.get(jobId).startTime
       });
       
-      // Call Modal Custom Tracker
       console.log(`🚀 Calling Modal tracker: ${MODAL_WEBHOOK_URL}`);
       
-      // Use AbortController for proper timeout handling
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 7200000); // 2 hours
       
+      let modalResponse;
       try {
-        const modalResponse = await fetch(MODAL_WEBHOOK_URL, {
+        modalResponse = await fetch(MODAL_WEBHOOK_URL, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             video_url: videoUrl,
             click_x: parseFloat(clickX) || 50.0,
@@ -874,16 +871,17 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
         }
         
         const results = await modalResponse.json();
-
+        
+        // CRITICAL: Check if Modal returned an error
         if (!results.success) {
-  throw new Error(results.error || 'Modal tracking failed');
-}
+          throw new Error(results.error || 'Modal tracking failed - no player found');
+        }
         
         console.log('✅ Analysis complete!');
-        // Support both old and new response formats
-        const targetPlayerId = results.target_permanent_id || results.target_player_id || results.processing_info?.target_permanent_id;
+        const targetPlayerId = results.target_permanent_id || results.target_player_id;
         console.log(`   Target player: Permanent ID ${targetPlayerId}`);
         console.log(`   Decision points: ${results.decision_points?.length || 0}`);
+        
         if (results.player_analytics) {
           console.log(`   Distance traveled: ${results.player_analytics.distance_traveled}px`);
           console.log(`   Average speed: ${results.player_analytics.average_speed} px/s`);
@@ -905,21 +903,12 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
       } catch (fetchError) {
         clearTimeout(timeoutId);
         
-        // Check if it was aborted (timeout or cancellation)
-        if (fetchError.name === 'AbortError' || fetchError.message?.includes('cancel')) {
-          throw new Error('Analysis was canceled or timed out. This may happen with very long videos. Try a shorter clip or contact support.');
+        if (fetchError.name === 'AbortError') {
+          throw new Error('Analysis timeout (2 hours). Video may be too long.');
         }
         
         throw fetchError;
       }
-
-      // Update progress: Modal processing
-      analysisJobs.set(jobId, {
-        status: 'processing',
-        progress: 50,
-        message: 'Tracking player movements...',
-        startTime: analysisJobs.get(jobId).startTime
-      });
       
     } catch (error) {
       console.error('❌ Analysis error:', error);
@@ -933,7 +922,7 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
         startTime: analysisJobs.get(jobId)?.startTime || Date.now()
       });
       
-      // Clean up temp file on error
+      // Clean up temp file
       if (req.file?.path) {
         fs.unlink(req.file.path, (err) => {
           if (err) console.error('Failed to delete temp file:', err);
@@ -942,8 +931,9 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
     }
   })();
 });
+
 // ============================================
-// ANALYSIS STATUS ENDPOINT (for progress polling)
+// ANALYSIS STATUS ENDPOINT
 // ============================================
 app.get('/api/analyze-status/:jobId', (req, res) => {
   const { jobId } = req.params;
@@ -971,9 +961,6 @@ app.get('/api/analyze-status/:jobId', (req, res) => {
   }
 });
 
-// ============================================
-// AI COACH ENDPOINT
-// ============================================
 // ============================================
 // AI COACH ENDPOINT
 // ============================================
