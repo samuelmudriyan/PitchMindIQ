@@ -237,10 +237,9 @@ if (!fs.existsSync(uploadsDir)) {
 app.use('/uploads', express.static(uploadsDir));
 
 // ============================================
-// STRIPE ROUTES
+// STRIPE ROUTES - FIXED: Only mount at /api/stripe
 // ============================================
 app.use('/api/stripe', stripeRoutes);
-app.use('/api', stripeRoutes);
 
 // Helper: Get or create user from Clerk ID
 async function getOrCreateUser(clerkId, userData = {}) {
@@ -310,7 +309,7 @@ const upload = multer({
 app.get('/', (req, res) => {
   res.json({ 
     status: 'PitchMind Backend Running',
-    version: '4.0 - Custom Tracker',
+    version: '4.1 - Long Video Support',
     features: ['video-analysis', 'custom-tracker', 'ai-coach', 'teamsnap-integration', 'database', 'stripe-payments'],
     database: DATABASE_URL ? 'connected' : 'not configured',
     modal: MODAL_WEBHOOK_URL ? 'configured' : 'not configured',
@@ -795,11 +794,11 @@ app.get('/api/sync', authMiddleware, async (req, res) => {
 });
 
 // ============================================
-// VIDEO ANALYSIS ENDPOINT - FIXED ERROR HANDLING
+// VIDEO ANALYSIS ENDPOINT - LONG VIDEO SUPPORT
 // ============================================
 app.post('/api/analyze', upload.single('video'), async (req, res) => {
   console.log('========================================');
-  console.log('📹 VIDEO ANALYSIS - CUSTOM TRACKER');
+  console.log('📹 VIDEO ANALYSIS - LONG VIDEO SUPPORT');
   console.log('========================================');
   
   if (!req.file) {
@@ -821,11 +820,11 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
     startTime: Date.now()
   });
 
-  // Return job ID immediately so frontend can poll for progress
+  // Return job ID immediately
   res.json({ 
     jobId, 
     status: 'processing',
-    message: 'Video analysis started. This may take 2-5 minutes.'
+    message: 'Video analysis started. Short clips: 2-5 min. Long videos (20+ min): 15-30 min.'
   });
 
   // Process video in background
@@ -872,7 +871,7 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
         
         const results = await modalResponse.json();
         
-        // CRITICAL: Check if Modal returned an error
+        // Check if Modal returned an error
         if (!results.success) {
           throw new Error(results.error || 'Modal tracking failed - no player found');
         }
@@ -1137,7 +1136,7 @@ app.get('/api/teamsnap/status', (req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 PitchMind Backend v4.0 - Custom Tracker`);
+  console.log(`🚀 PitchMind Backend v4.1 - Long Video Support`);
   console.log(`   Port: ${PORT}`);
   console.log(`   Database: ${DATABASE_URL ? '✅ Connected' : '❌ Not configured'}`);
   console.log(`   Modal: ${MODAL_WEBHOOK_URL ? '✅ Configured' : '❌ Not configured'}`);
