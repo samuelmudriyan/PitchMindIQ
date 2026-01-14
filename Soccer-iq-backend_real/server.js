@@ -170,6 +170,56 @@ async function initDatabase() {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      -- ============================================
+      -- MANUAL TAGGING TABLES
+      -- ============================================
+      
+      -- Tagged games/sessions
+      CREATE TABLE IF NOT EXISTS tagged_games (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        video_filename VARCHAR(255),
+        video_url TEXT,
+        title VARCHAR(255),
+        date DATE,
+        duration FLOAT,
+        tags_count INTEGER DEFAULT 0,
+        analyzed BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Players in a specific game (local to that game)
+      CREATE TABLE IF NOT EXISTS game_players (
+        id SERIAL PRIMARY KEY,
+        game_id INTEGER REFERENCES tagged_games(id) ON DELETE CASCADE,
+        player_name VARCHAR(255),
+        jersey_number INTEGER,
+        team VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Individual event tags
+      CREATE TABLE IF NOT EXISTS game_events (
+        id SERIAL PRIMARY KEY,
+        game_id INTEGER REFERENCES tagged_games(id) ON DELETE CASCADE,
+        game_player_id INTEGER REFERENCES game_players(id) ON DELETE CASCADE,
+        timestamp FLOAT,
+        event_type VARCHAR(50),
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- AI-generated insights from manual tags
+      CREATE TABLE IF NOT EXISTS game_insights (
+        id SERIAL PRIMARY KEY,
+        game_id INTEGER REFERENCES tagged_games(id) ON DELETE CASCADE,
+        insight_type VARCHAR(50),
+        description TEXT,
+        related_events JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
       -- Create indexes
       CREATE INDEX IF NOT EXISTS idx_players_user_id ON players(user_id);
       CREATE INDEX IF NOT EXISTS idx_players_team_id ON players(team_id);
@@ -178,9 +228,12 @@ async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_analyses_player_id ON analyses(player_id);
       CREATE INDEX IF NOT EXISTS idx_analyses_user_id ON analyses(user_id);
       CREATE INDEX IF NOT EXISTS idx_subscriptions_clerk_user_id ON subscriptions(clerk_user_id);
+      CREATE INDEX IF NOT EXISTS idx_tagged_games_user_id ON tagged_games(user_id);
+      CREATE INDEX IF NOT EXISTS idx_game_events_game_id ON game_events(game_id);
+      CREATE INDEX IF NOT EXISTS idx_game_players_game_id ON game_players(game_id);
     `);
     
-    console.log('✅ Database tables initialized');
+    console.log('✅ Database tables initialized (including manual tagging)');
   } catch (err) {
     console.error('Database init error:', err);
   } finally {
@@ -309,8 +362,8 @@ const upload = multer({
 app.get('/', (req, res) => {
   res.json({ 
     status: 'PitchMind Backend Running',
-    version: '4.1 - Long Video Support',
-    features: ['video-analysis', 'custom-tracker', 'ai-coach', 'teamsnap-integration', 'database', 'stripe-payments'],
+    version: '4.2 - Manual Tagging + Long Video Support',
+    features: ['video-analysis', 'custom-tracker', 'manual-tagging', 'ai-coach', 'teamsnap-integration', 'database', 'stripe-payments'],
     database: DATABASE_URL ? 'connected' : 'not configured',
     modal: MODAL_WEBHOOK_URL ? 'configured' : 'not configured',
     teamsnap: TEAMSNAP_CLIENT_ID ? 'configured' : 'not configured',
@@ -755,11 +808,346 @@ app.delete('/api/chat-history', authMiddleware, async (req, res) => {
 });
 
 // ============================================
+// MANUAL TAGGING ENDPOINTS
+// ============================================
+
+// Get all tagged games for user
+app.get('/api/tagged-games', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM tagged_games WHERE user_id = $1 ORDER BY created_at DESC',
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Get tagged games error:', err);
+    res.status(500).json({ error: 'Failed to fetch tagged games' });
+  }
+});
+
+// Get specific tagged game with all data
+app.get('/api/tagged-games/:id', authMiddleware, async (req, res) => {
+  try {
+    const gameResult = await pool.query(
+      'SELECT * FROM tagged_games WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    
+    if (gameResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Game not found' });
+    }
+    
+    const game = gameResult.rows[0];
+    
+    // Get players
+    const playersResult = await pool.query(
+      'SELECT * FROM game_players WHERE game_id = $1 ORDER BY team, jersey_number',
+      [req.params.id]
+    );
+    
+    // Get events
+    const eventsResult = await pool.query(
+      `SELECT e.*, p.player_name, p.jersey_number, p.team 
+       FROM game_events e
+       LEFT JOIN game_players p ON e.game_player_id = p.id
+       WHERE e.game_id = $1
+       ORDER BY e.timestamp ASC`,
+      [req.params.id]
+    );
+    
+    // Get insights
+    const insightsResult = await pool.query(
+      'SELECT * FROM game_insights WHERE game_id = $1 ORDER BY created_at DESC',
+      [req.params.id]
+    );
+    
+    res.json({
+      ...game,
+      players: playersResult.rows,
+      events: eventsResult.rows,
+      insights: insightsResult.rows
+    });
+  } catch (err) {
+    console.error('Get tagged game error:', err);
+    res.status(500).json({ error: 'Failed to fetch game data' });
+  }
+});
+
+// Create new tagged game
+app.post('/api/tagged-games', authMiddleware, upload.single('video'), async (req, res) => {
+  try {
+    const { title, date } = req.body;
+    const videoFile = req.file;
+    
+    if (!videoFile) {
+      return res.status(400).json({ error: 'No video file uploaded' });
+    }
+    
+    // Generate video URL
+    const videoUrl = `${BACKEND_URL}/uploads/${encodeURIComponent(videoFile.filename)}`;
+    
+    // Get video metadata (you can enhance this with ffprobe)
+    const duration = 0; // Placeholder - implement with ffprobe if needed
+    
+    const result = await pool.query(
+      `INSERT INTO tagged_games (user_id, video_filename, video_url, title, date, duration)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [req.user.id, videoFile.filename, videoUrl, title, date, duration]
+    );
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Create tagged game error:', err);
+    res.status(500).json({ error: 'Failed to create game' });
+  }
+});
+
+// Add player to game
+app.post('/api/tagged-games/:gameId/players', authMiddleware, async (req, res) => {
+  try {
+    const { playerName, jerseyNumber, team } = req.body;
+    
+    // Verify game belongs to user
+    const gameCheck = await pool.query(
+      'SELECT id FROM tagged_games WHERE id = $1 AND user_id = $2',
+      [req.params.gameId, req.user.id]
+    );
+    
+    if (gameCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Game not found' });
+    }
+    
+    const result = await pool.query(
+      `INSERT INTO game_players (game_id, player_name, jersey_number, team)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [req.params.gameId, playerName, jerseyNumber, team]
+    );
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Add game player error:', err);
+    res.status(500).json({ error: 'Failed to add player' });
+  }
+});
+
+// Add event tag
+app.post('/api/tagged-games/:gameId/events', authMiddleware, async (req, res) => {
+  try {
+    const { gamePlayerId, timestamp, eventType, notes } = req.body;
+    
+    // Verify game belongs to user
+    const gameCheck = await pool.query(
+      'SELECT id FROM tagged_games WHERE id = $1 AND user_id = $2',
+      [req.params.gameId, req.user.id]
+    );
+    
+    if (gameCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Game not found' });
+    }
+    
+    const result = await pool.query(
+      `INSERT INTO game_events (game_id, game_player_id, timestamp, event_type, notes)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [req.params.gameId, gamePlayerId, timestamp, eventType, notes]
+    );
+    
+    // Update tags count
+    await pool.query(
+      'UPDATE tagged_games SET tags_count = tags_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [req.params.gameId]
+    );
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Add event tag error:', err);
+    res.status(500).json({ error: 'Failed to add event' });
+  }
+});
+
+// Delete event tag
+app.delete('/api/tagged-games/:gameId/events/:eventId', authMiddleware, async (req, res) => {
+  try {
+    // Verify game belongs to user
+    const gameCheck = await pool.query(
+      'SELECT id FROM tagged_games WHERE id = $1 AND user_id = $2',
+      [req.params.gameId, req.user.id]
+    );
+    
+    if (gameCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Game not found' });
+    }
+    
+    await pool.query('DELETE FROM game_events WHERE id = $1 AND game_id = $2', 
+      [req.params.eventId, req.params.gameId]);
+    
+    // Update tags count
+    await pool.query(
+      'UPDATE tagged_games SET tags_count = tags_count - 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [req.params.gameId]
+    );
+    
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Delete event error:', err);
+    res.status(500).json({ error: 'Failed to delete event' });
+  }
+});
+
+// Generate AI insights from tags
+app.post('/api/tagged-games/:gameId/analyze', authMiddleware, async (req, res) => {
+  try {
+    // Verify game belongs to user
+    const gameCheck = await pool.query(
+      'SELECT id FROM tagged_games WHERE id = $1 AND user_id = $2',
+      [req.params.gameId, req.user.id]
+    );
+    
+    if (gameCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Game not found' });
+    }
+    
+    // Get all events for this game
+    const eventsResult = await pool.query(
+      `SELECT e.*, p.player_name, p.jersey_number, p.team 
+       FROM game_events e
+       LEFT JOIN game_players p ON e.game_player_id = p.id
+       WHERE e.game_id = $1
+       ORDER BY e.timestamp ASC`,
+      [req.params.gameId]
+    );
+    
+    const events = eventsResult.rows;
+    
+    if (events.length === 0) {
+      return res.status(400).json({ error: 'No events to analyze' });
+    }
+    
+    // Call Groq AI to generate insights
+    if (!GROQ_API_KEY) {
+      return res.status(500).json({ error: 'AI analysis not configured' });
+    }
+    
+    const systemPrompt = `You are a professional soccer coach analyzing a tagged game. 
+You will receive a list of tagged events (passes, shots, turnovers, etc.) with timestamps, players, and event types.
+Analyze the data and provide insights about:
+1. Decision patterns (good vs poor decisions)
+2. Player tendencies
+3. Tactical observations
+4. Areas for improvement
+
+Format your response as a JSON array of insights, each with:
+- insight_type: "decision_point" | "pattern" | "weakness" | "strength"
+- description: detailed text
+- related_events: array of event IDs that support this insight`;
+    
+    const eventsText = events.map(e => 
+      `[${e.timestamp}s] ${e.player_name} (#${e.jersey_number}, ${e.team}): ${e.event_type}${e.notes ? ` - ${e.notes}` : ''}`
+    ).join('\n');
+    
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${GROQ_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Analyze these ${events.length} tagged events:\n\n${eventsText}` }
+        ],
+        max_tokens: 2048,
+        temperature: 0.7
+      })
+    });
+    
+    if (!response.ok) {
+      console.error('Groq API error');
+      return res.status(500).json({ error: 'AI analysis failed' });
+    }
+    
+    const data = await response.json();
+    const aiResponse = data.choices?.[0]?.message?.content || '[]';
+    
+    // Parse AI response
+    let insights = [];
+    try {
+      // Try to extract JSON from response (AI might wrap it in markdown)
+      const jsonMatch = aiResponse.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        insights = JSON.parse(jsonMatch[0]);
+      }
+    } catch (parseError) {
+      // If parsing fails, create a single insight from the text
+      insights = [{
+        insight_type: 'pattern',
+        description: aiResponse,
+        related_events: []
+      }];
+    }
+    
+    // Save insights to database
+    const savedInsights = [];
+    for (const insight of insights) {
+      const result = await pool.query(
+        `INSERT INTO game_insights (game_id, insight_type, description, related_events)
+         VALUES ($1, $2, $3, $4)
+         RETURNING *`,
+        [req.params.gameId, insight.insight_type, insight.description, JSON.stringify(insight.related_events || [])]
+      );
+      savedInsights.push(result.rows[0]);
+    }
+    
+    // Mark game as analyzed
+    await pool.query(
+      'UPDATE tagged_games SET analyzed = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [req.params.gameId]
+    );
+    
+    res.json({ success: true, insights: savedInsights });
+  } catch (err) {
+    console.error('AI analysis error:', err);
+    res.status(500).json({ error: 'Failed to generate insights' });
+  }
+});
+
+// Delete tagged game
+app.delete('/api/tagged-games/:id', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM tagged_games WHERE id = $1 AND user_id = $2 RETURNING video_filename',
+      [req.params.id, req.user.id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Game not found' });
+    }
+    
+    // Optionally delete video file
+    const videoFile = result.rows[0].video_filename;
+    if (videoFile) {
+      const videoPath = path.join(uploadsDir, videoFile);
+      if (fs.existsSync(videoPath)) {
+        fs.unlinkSync(videoPath);
+      }
+    }
+    
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Delete game error:', err);
+    res.status(500).json({ error: 'Failed to delete game' });
+  }
+});
+
+// ============================================
 // SYNC ENDPOINT
 // ============================================
 app.get('/api/sync', authMiddleware, async (req, res) => {
   try {
-    const [teams, players, analyses, sessions, chatHistory] = await Promise.all([
+    const [teams, players, analyses, sessions, chatHistory, taggedGames] = await Promise.all([
       pool.query('SELECT * FROM teams WHERE user_id = $1 ORDER BY created_at DESC', [req.user.id]),
       pool.query(`
         SELECT p.*, t.name as team_name 
@@ -776,7 +1164,8 @@ app.get('/api/sync', authMiddleware, async (req, res) => {
         ORDER BY a.created_at DESC
       `, [req.user.id]),
       pool.query('SELECT * FROM sessions WHERE user_id = $1 ORDER BY date DESC', [req.user.id]),
-      pool.query('SELECT * FROM chat_history WHERE user_id = $1 ORDER BY created_at ASC LIMIT 100', [req.user.id])
+      pool.query('SELECT * FROM chat_history WHERE user_id = $1 ORDER BY created_at ASC LIMIT 100', [req.user.id]),
+      pool.query('SELECT * FROM tagged_games WHERE user_id = $1 ORDER BY created_at DESC', [req.user.id])
     ]);
     
     res.json({
@@ -785,7 +1174,8 @@ app.get('/api/sync', authMiddleware, async (req, res) => {
       players: players.rows,
       analyses: analyses.rows,
       sessions: sessions.rows,
-      chatHistory: chatHistory.rows
+      chatHistory: chatHistory.rows,
+      taggedGames: taggedGames.rows
     });
   } catch (err) {
     console.error('Sync error:', err);
@@ -1143,7 +1533,7 @@ app.use('/api', stripeRoutes);
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 PitchMind Backend v4.1 - Long Video Support`);
+  console.log(`🚀 PitchMind Backend v4.2 - Manual Tagging + Long Video Support`);
   console.log(`   Port: ${PORT}`);
   console.log(`   Database: ${DATABASE_URL ? '✅ Connected' : '❌ Not configured'}`);
   console.log(`   Modal: ${MODAL_WEBHOOK_URL ? '✅ Configured' : '❌ Not configured'}`);
