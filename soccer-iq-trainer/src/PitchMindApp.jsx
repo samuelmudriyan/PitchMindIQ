@@ -651,6 +651,10 @@ export default function PitchMindApp() {
   const [gamePlayers, setGamePlayers] = useState([]);
   const [gameEvents, setGameEvents] = useState([]);
   const [gameInsights, setGameInsights] = useState([]);
+  const [gameEvents, setGameEvents] = useState([]);
+  const [gameInsights, setGameInsights] = useState([]);
+  const [taggingMode, setTaggingMode] = useState(false);
+  const gameVideoRef = useRef(null);
   
   const [showModal, setShowModal] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
@@ -1270,335 +1274,334 @@ useEffect(() => {
     </PageWrapper>
   );
 
-  // ============================================
-  // MANUAL TAGGING PAGE
-  // ============================================
+ // ============================================
+// MANUAL TAGGING PAGE
+// ============================================
+const ManualTaggingPage = () => {
+  const [uploadingGame, setUploadingGame] = useState(false);
+  const [analyzingGame, setAnalyzingGame] = useState(false);
+  const [loadingGame, setLoadingGame] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
+  const gameUploadInputRef = useRef(null);
   
-  const ManualTaggingPage = () => {
-    const [uploadingGame, setUploadingGame] = useState(false);
-    const [taggingMode, setTaggingMode] = useState(false);
-    const [analyzingGame, setAnalyzingGame] = useState(false);
-    const gameUploadInputRef = useRef(null);
+  const handleUploadGame = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
     
-    const handleUploadGame = async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      
-      setUploadingGame(true);
-      const formData = new FormData();
-      formData.append('video', file);
-      formData.append('title', file.name.replace(/\.[^/.]+$/, ''));
-      formData.append('date', new Date().toISOString().split('T')[0]);
-      
-      try {
-        const response = await fetch(`${API_BASE}/api/tagged-games`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${user.id}`
-          },
-          body: formData
-        });
-        
-        if (!response.ok) throw new Error('Upload failed');
-        
-        const result = await response.json();
-        setTaggedGames([result, ...taggedGames]);
-        setCurrentGame(result);
-        setGameEvents([]);
-        setGameInsights([]);
-        setTaggingMode(true);
-      } catch (err) {
-        alert('Upload failed: ' + err.message);
-      }
-      setUploadingGame(false);
-    };
+    setUploadingGame(true);
+    const formData = new FormData();
+    formData.append('video', file);
+    formData.append('title', file.name.replace(/\.[^/.]+$/, ''));
+    formData.append('date', new Date().toISOString().split('T')[0]);
     
-    const addEventTag = async (eventType) => {
-      if (!gameVideoRef.current || !currentGame) return;
-      const timestamp = gameVideoRef.current.currentTime;
+    try {
+      const response = await fetch(`${API_BASE}/api/tagged-games`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${user.id}` },
+        body: formData
+      });
       
-      try {
-        const response = await fetch(`${API_BASE}/api/tagged-games/${currentGame.id}/events`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${user.id}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            gamePlayerId: null,
-            timestamp,
-            eventType,
-            notes: ''
-          })
-        });
-        
-        if (!response.ok) throw new Error('Failed to add tag');
-        
-        const event = await response.json();
-        setGameEvents([...gameEvents, event]);
-        
-        // Update tags count in local state
-        setTaggedGames(prev => prev.map(g => 
-          g.id === currentGame.id ? { ...g, tags_count: (g.tags_count || 0) + 1 } : g
-        ));
-        setCurrentGame(prev => ({ ...prev, tags_count: (prev.tags_count || 0) + 1 }));
-      } catch (err) {
-        alert('Failed to add tag: ' + err.message);
-      }
-    };
-    
-    const deleteEventTag = async (eventId) => {
-      if (!window.confirm('Delete this tag?')) return;
+      if (!response.ok) throw new Error('Upload failed');
       
-      try {
-        await fetch(`${API_BASE}/api/tagged-games/${currentGame.id}/events/${eventId}`, {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${user.id}`
-          }
-        });
-        
-        setGameEvents(gameEvents.filter(e => e.id !== eventId));
-        setTaggedGames(prev => prev.map(g => 
-          g.id === currentGame.id ? { ...g, tags_count: Math.max(0, (g.tags_count || 1) - 1) } : g
-        ));
-        setCurrentGame(prev => ({ ...prev, tags_count: Math.max(0, (prev.tags_count || 1) - 1) }));
-      } catch (err) {
-        alert('Failed to delete tag');
-      }
-    };
-    
-    const analyzeGame = async () => {
-      if (!currentGame || gameEvents.length === 0) {
-        alert('Add some event tags before analyzing');
-        return;
-      }
+      const result = await response.json();
+      console.log('✅ Game uploaded:', result);
       
-      setAnalyzingGame(true);
-      try {
-        const response = await fetch(`${API_BASE}/api/tagged-games/${currentGame.id}/analyze`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${user.id}`
-          }
-        });
-        
-        if (!response.ok) throw new Error('Analysis failed');
-        
-        const result = await response.json();
-        setGameInsights(result.insights || []);
-        setCurrentGame(prev => ({ ...prev, analyzed: true }));
-        setTaggedGames(prev => prev.map(g => 
-          g.id === currentGame.id ? { ...g, analyzed: true } : g
-        ));
-      } catch (err) {
-        alert('AI analysis failed: ' + err.message);
-      }
-      setAnalyzingGame(false);
-    };
-    
-    const loadGameData = async (game) => {
-      setCurrentGame(game);
+      setTaggedGames([result, ...taggedGames]);
+      setCurrentGame(result);
+      setGameEvents([]);
+      setGameInsights([]);
       setTaggingMode(true);
       
-      try {
-        const response = await fetch(`${API_BASE}/api/tagged-games/${game.id}`, {
-          headers: {
-            'Authorization': `Bearer ${user.id}`
-          }
-        });
-        
-        if (!response.ok) throw new Error('Failed to load game data');
-        
-        const data = await response.json();
-        setGameEvents(data.events || []);
-        setGameInsights(data.insights || []);
-      } catch (err) {
-        console.error('Failed to load game data:', err);
-      }
-    };
+      if (gameUploadInputRef.current) gameUploadInputRef.current.value = '';
+    } catch (err) {
+      console.error('❌ Upload error:', err);
+      alert('Upload failed: ' + err.message);
+    } finally {
+      setUploadingGame(false);
+    }
+  };
+  
+  const addEventTag = async (eventType) => {
+    if (!gameVideoRef.current || !currentGame) return;
     
-    const deleteGame = async (gameId) => {
-      if (!window.confirm('Delete this tagged game?')) return;
+    const timestamp = gameVideoRef.current.currentTime;
+    
+    try {
+      const response = await fetch(`${API_BASE}/api/tagged-games/${currentGame.id}/events`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${user.id}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ gamePlayerId: null, timestamp, eventType, notes: '' })
+      });
       
-      try {
-        await fetch(`${API_BASE}/api/tagged-games/${gameId}`, {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${user.id}`
-          }
-        });
-        
-        setTaggedGames(prev => prev.filter(g => g.id !== gameId));
-        if (currentGame?.id === gameId) {
-          setCurrentGame(null);
-          setTaggingMode(false);
-        }
-      } catch (err) {
-        alert('Failed to delete game');
-      }
-    };
+      if (!response.ok) throw new Error('Failed to add tag');
+      
+      const event = await response.json();
+      setGameEvents(prev => [...prev, event].sort((a, b) => a.timestamp - b.timestamp));
+      
+      const newCount = (currentGame.tags_count || 0) + 1;
+      setCurrentGame(prev => ({ ...prev, tags_count: newCount }));
+      setTaggedGames(prev => prev.map(g => g.id === currentGame.id ? { ...g, tags_count: newCount } : g));
+    } catch (err) {
+      alert('Failed to add tag: ' + err.message);
+    }
+  };
+  
+  const deleteEventTag = async (eventId) => {
+    if (!window.confirm('Delete this tag?')) return;
     
-    return (
-      <PageWrapper title="Manual Tagging" sidebarCollapsed={sidebarCollapsed} currentPage="manualTagging" setCurrentPage={setCurrentPage}>
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold text-white mb-2">Manual Game Tagging</h2>
-          <p className="text-gray-400">Upload game footage, tag players and events while watching, then let AI analyze patterns.</p>
+    try {
+      await fetch(`${API_BASE}/api/tagged-games/${currentGame.id}/events/${eventId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${user.id}` }
+      });
+      
+      setGameEvents(prev => prev.filter(e => e.id !== eventId));
+      const newCount = Math.max(0, (currentGame.tags_count || 1) - 1);
+      setCurrentGame(prev => ({ ...prev, tags_count: newCount }));
+      setTaggedGames(prev => prev.map(g => g.id === currentGame.id ? { ...g, tags_count: newCount } : g));
+    } catch (err) {
+      alert('Failed to delete tag');
+    }
+  };
+  
+  const analyzeGame = async () => {
+    if (!currentGame || gameEvents.length === 0) {
+      alert('Add some event tags before analyzing');
+      return;
+    }
+    
+    setAnalyzingGame(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/tagged-games/${currentGame.id}/analyze`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${user.id}` }
+      });
+      
+      if (!response.ok) throw new Error('Analysis failed');
+      
+      const result = await response.json();
+      setGameInsights(result.insights || []);
+      setCurrentGame(prev => ({ ...prev, analyzed: true }));
+      setTaggedGames(prev => prev.map(g => g.id === currentGame.id ? { ...g, analyzed: true } : g));
+    } catch (err) {
+      alert('AI analysis failed: ' + err.message);
+    } finally {
+      setAnalyzingGame(false);
+    }
+  };
+  
+  const loadGameData = async (game) => {
+    console.log('🎬 Loading game:', game.id);
+    setLoadingGame(true);
+    
+    try {
+      const response = await fetch(`${API_BASE}/api/tagged-games/${game.id}`, {
+        headers: { 'Authorization': `Bearer ${user.id}` }
+      });
+      
+      if (!response.ok) throw new Error('Failed to load');
+      
+      const data = await response.json();
+      console.log('✅ Loaded:', data);
+      
+      if (!data.video_url) throw new Error('No video URL');
+      
+      // CRITICAL: Set everything at once to prevent race conditions
+      setCurrentGame(data);
+      setGameEvents(data.events || []);
+      setGameInsights(data.insights || []);
+      setTaggingMode(true);
+      
+      console.log('✅ Tagging mode enabled');
+    } catch (err) {
+      console.error('❌ Load error:', err);
+      alert('Failed to load: ' + err.message);
+    } finally {
+      setLoadingGame(false);
+    }
+  };
+  
+  const deleteGame = async (gameId) => {
+    if (!window.confirm('Delete this game?')) return;
+    
+    try {
+      await fetch(`${API_BASE}/api/tagged-games/${gameId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${user.id}` }
+      });
+      
+      setTaggedGames(prev => prev.filter(g => g.id !== gameId));
+      if (currentGame?.id === gameId) {
+        setCurrentGame(null);
+        setGameEvents([]);
+        setGameInsights([]);
+        setTaggingMode(false);
+      }
+    } catch (err) {
+      alert('Failed to delete');
+    }
+  };
+  
+  const closeTagging = () => {
+    console.log('🚪 Closing tagging mode');
+    setCurrentGame(null);
+    setGameEvents([]);
+    setGameInsights([]);
+    setTaggingMode(false);
+  };
+  
+  // Debug: Log whenever taggingMode changes
+  useEffect(() => {
+    console.log('🔄 taggingMode changed to:', taggingMode);
+  }, [taggingMode]);
+  
+  return (
+    <PageWrapper title="Manual Tagging" sidebarCollapsed={sidebarCollapsed} currentPage="manualTagging" setCurrentPage={setCurrentPage}>
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold text-white mb-2">Manual Game Tagging</h2>
+        <p className="text-gray-400">Upload games, tag events, let AI analyze patterns.</p>
+        <button onClick={() => setShowDebug(!showDebug)} className="mt-2 text-xs text-gray-500 hover:text-gray-400">
+          {showDebug ? 'Hide' : 'Show'} Debug
+        </button>
+      </div>
+      
+      {showDebug && (
+        <div className="mb-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-xs text-yellow-400 space-y-1">
+          <div>taggingMode: <strong>{String(taggingMode)}</strong></div>
+          <div>currentGame: <strong>{currentGame?.id || 'null'}</strong></div>
+          <div>video_url: <strong>{currentGame?.video_url ? '✓ present' : '✗ missing'}</strong></div>
+          <div>events: <strong>{gameEvents.length}</strong></div>
         </div>
-        
-        {!taggingMode ? (
-          <div className="space-y-6">
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-8">
-              <input 
-                type="file" 
-                accept="video/*" 
-                onChange={handleUploadGame} 
-                className="hidden" 
-                id="game-upload" 
-                ref={gameUploadInputRef}
-              />
-              <label htmlFor="game-upload" className="flex flex-col items-center cursor-pointer">
-                <div className="w-16 h-16 bg-blue-500/20 rounded-2xl flex items-center justify-center mb-4">
-                  {uploadingGame ? <Loader2 className="w-8 h-8 text-blue-400 animate-spin" /> : <Upload className="w-8 h-8 text-blue-400" />}
-                </div>
-                <h3 className="text-xl font-bold text-white mb-2">Upload Game Video</h3>
-                <p className="text-gray-400 mb-4">Click to select a full game or match footage</p>
-                {uploadingGame && <p className="text-blue-400 text-sm">Uploading...</p>}
-              </label>
-            </div>
-            
-            {taggedGames.length > 0 && (
-              <div>
-                <h3 className="text-lg font-bold text-white mb-4">Your Tagged Games</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {taggedGames.map(game => (
-                    <div key={game.id} className="bg-white/5 border border-white/10 rounded-2xl p-6 hover:border-blue-500/30 transition-all group">
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="flex-1">
-                          <h4 className="font-bold text-white mb-2 line-clamp-1 group-hover:text-blue-400 cursor-pointer" onClick={() => loadGameData(game)}>{game.title}</h4>
-                          <p className="text-gray-400 text-sm mb-2">{game.date}</p>
-                          <div className="flex items-center space-x-2">
-                            <span className="bg-blue-500/20 text-blue-400 px-2 py-1 rounded text-xs font-semibold">{game.tags_count || 0} tags</span>
-                            {game.analyzed && <span className="bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded text-xs font-semibold">✓ Analyzed</span>}
-                          </div>
+      )}
+      
+      {!taggingMode ? (
+        <div className="space-y-6">
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-8">
+            <input type="file" accept="video/*" onChange={handleUploadGame} className="hidden" id="game-upload" ref={gameUploadInputRef} />
+            <label htmlFor="game-upload" className="flex flex-col items-center cursor-pointer">
+              <div className="w-16 h-16 bg-blue-500/20 rounded-2xl flex items-center justify-center mb-4">
+                {uploadingGame ? <Loader2 className="w-8 h-8 text-blue-400 animate-spin" /> : <Upload className="w-8 h-8 text-blue-400" />}
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">Upload Game Video</h3>
+              <p className="text-gray-400">{uploadingGame ? 'Uploading...' : 'Click to select game footage'}</p>
+            </label>
+          </div>
+          
+          {taggedGames.length > 0 && (
+            <div>
+              <h3 className="text-lg font-bold text-white mb-4">Your Tagged Games</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {taggedGames.map(game => (
+                  <div key={game.id} className="bg-white/5 border border-white/10 rounded-xl p-5 hover:border-blue-500/30 transition-all group">
+                    <div className="flex justify-between mb-3">
+                      <div className="flex-1">
+                        <h4 className="font-bold text-white mb-1">{game.title}</h4>
+                        <p className="text-gray-400 text-sm">{game.date}</p>
+                        <div className="flex gap-2 mt-2">
+                          <span className="bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded text-xs">{game.tags_count || 0} tags</span>
+                          {game.analyzed && <span className="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded text-xs">✓</span>}
                         </div>
-                        <button onClick={() => deleteGame(game.id)} className="p-2 text-gray-400 hover:text-red-400 hover:bg-white/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
                       </div>
-                      <button onClick={() => loadGameData(game)} className="w-full py-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 font-medium text-sm">
-                        Open & Tag
+                      <button onClick={(e) => { e.stopPropagation(); deleteGame(game.id); }} className="p-2 text-gray-400 hover:text-red-400 h-fit opacity-0 group-hover:opacity-100">
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
-                  ))}
-                </div>
+                    <button onClick={() => loadGameData(game)} disabled={loadingGame} className="w-full py-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 font-medium text-sm">
+                      {loadingGame ? 'Loading...' : 'Open & Tag'}
+                    </button>
+                  </div>
+                ))}
               </div>
-            )}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <h3 className="text-xl font-bold text-white">{currentGame?.title}</h3>
+              <p className="text-gray-400 text-sm">{gameEvents.length} events</p>
+            </div>
+            <button onClick={closeTagging} className="text-gray-400 hover:text-white flex items-center gap-2 px-3 py-2 hover:bg-white/5 rounded-lg">
+              <ChevronLeft className="w-4 h-4" />Back
+            </button>
           </div>
-        ) : (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-xl font-bold text-white">{currentGame?.title}</h3>
-                <p className="text-gray-400 text-sm">{currentGame?.date} • {gameEvents.length} events tagged</p>
-              </div>
-              <button onClick={() => { setTaggingMode(false); setCurrentGame(null); }} className="text-gray-400 hover:text-white flex items-center space-x-2">
-                <ChevronLeft className="w-4 h-4" />
-                <span>Back to list</span>
-              </button>
+          
+          <div className="grid lg:grid-cols-2 gap-4">
+            <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
+              {currentGame?.video_url ? (
+                <>
+                  <video ref={gameVideoRef} src={currentGame.video_url} className="w-full bg-black" controls />
+                  <div className="p-4">
+                    <div className="grid grid-cols-3 gap-2">
+                      <button onClick={() => addEventTag('pass')} className="px-3 py-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 text-sm">Pass</button>
+                      <button onClick={() => addEventTag('shot')} className="px-3 py-2 bg-amber-500/20 text-amber-400 rounded-lg hover:bg-amber-500/30 text-sm">Shot</button>
+                      <button onClick={() => addEventTag('tackle')} className="px-3 py-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 text-sm">Tackle</button>
+                      <button onClick={() => addEventTag('turnover')} className="px-3 py-2 bg-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/30 text-sm">Turnover</button>
+                      <button onClick={() => addEventTag('goal')} className="px-3 py-2 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 text-sm">Goal</button>
+                      <button onClick={() => addEventTag('dribble')} className="px-3 py-2 bg-cyan-500/20 text-cyan-400 rounded-lg hover:bg-cyan-500/30 text-sm">Dribble</button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="p-8 text-center text-red-400">Video URL missing</div>
+              )}
             </div>
             
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Video Player */}
-              <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
-                <video ref={gameVideoRef} src={currentGame?.video_url} className="w-full" controls />
-                <div className="p-4">
-                  <h4 className="text-white font-semibold mb-3">Tag Event</h4>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button onClick={() => addEventTag('pass')} className="px-3 py-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 text-sm font-medium">Pass</button>
-                    <button onClick={() => addEventTag('shot')} className="px-3 py-2 bg-amber-500/20 text-amber-400 rounded-lg hover:bg-amber-500/30 text-sm font-medium">Shot</button>
-                    <button onClick={() => addEventTag('tackle')} className="px-3 py-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 text-sm font-medium">Tackle</button>
-                    <button onClick={() => addEventTag('turnover')} className="px-3 py-2 bg-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/30 text-sm font-medium">Turnover</button>
-                    <button onClick={() => addEventTag('goal')} className="px-3 py-2 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 text-sm font-medium">Goal</button>
-                    <button onClick={() => addEventTag('dribble')} className="px-3 py-2 bg-cyan-500/20 text-cyan-400 rounded-lg hover:bg-cyan-500/30 text-sm font-medium">Dribble</button>
-                  </div>
+            <div className="space-y-4">
+              <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="font-bold text-white">Events ({gameEvents.length})</h4>
+                  {gameEvents.length > 0 && (
+                    <button onClick={analyzeGame} disabled={analyzingGame} className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-gray-600 text-white rounded-lg text-sm flex items-center gap-2">
+                      {analyzingGame ? <><Loader2 className="w-3 h-3 animate-spin" />Analyzing</> : <><Brain className="w-3 h-3" />Analyze</>}
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-1 max-h-64 overflow-y-auto">
+                  {gameEvents.length === 0 ? (
+                    <div className="text-center py-8 text-gray-400 text-sm">
+                      <Tag className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                      No events yet
+                    </div>
+                  ) : (
+                    gameEvents.map(e => (
+                      <div key={e.id} className="flex justify-between items-center p-2 bg-white/5 rounded group">
+                        <span className="text-white text-sm capitalize">{e.event_type} <span className="text-gray-500 text-xs">{formatTime(e.timestamp)}</span></span>
+                        <button onClick={() => deleteEventTag(e.id)} className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
               
-              {/* Tagged Events & Insights */}
-              <div className="space-y-4">
-                {/* Events List */}
-                <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h4 className="font-bold text-white">Tagged Events ({gameEvents.length})</h4>
-                    {gameEvents.length > 0 && (
-                      <button 
-                        onClick={analyzeGame} 
-                        disabled={analyzingGame}
-                        className="flex items-center space-x-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-gray-600 text-white rounded-lg text-sm font-semibold"
-                      >
-                        {analyzingGame ? (
-                          <><Loader2 className="w-4 h-4 animate-spin" /><span>Analyzing...</span></>
-                        ) : (
-                          <><Brain className="w-4 h-4" /><span>AI Analyze</span></>
-                        )}
-                      </button>
-                    )}
-                  </div>
+              {gameInsights.length > 0 && (
+                <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                  <h4 className="font-bold text-white mb-3 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-emerald-400" />AI Insights
+                  </h4>
                   <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {gameEvents.length === 0 ? (
-                      <div className="text-center py-8 text-gray-400">
-                        <Tag className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                        <p className="text-sm">No events tagged yet. Play the video and click buttons to tag events.</p>
+                    {gameInsights.map((ins, i) => (
+                      <div key={i} className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                        <p className="text-xs text-emerald-400 font-semibold uppercase mb-1">{ins.insight_type}</p>
+                        <p className="text-gray-300 text-sm">{ins.description}</p>
                       </div>
-                    ) : (
-                      gameEvents.map((event) => (
-                        <div key={event.id} className="flex items-center justify-between p-3 bg-white/5 rounded-lg group">
-                          <div className="flex-1">
-                            <span className="text-white font-medium capitalize">{event.event_type}</span>
-                            <span className="text-gray-400 text-sm ml-2">{formatTime(event.timestamp)}</span>
-                          </div>
-                          <button onClick={() => deleteEventTag(event.id)} className="p-1 text-gray-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all">
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ))
-                    )}
+                    ))}
                   </div>
                 </div>
-                
-                {/* AI Insights */}
-                {gameInsights.length > 0 && (
-                  <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                    <h4 className="font-bold text-white mb-4 flex items-center space-x-2">
-                      <Sparkles className="w-5 h-5 text-emerald-400" />
-                      <span>AI Insights</span>
-                    </h4>
-                    <div className="space-y-3 max-h-64 overflow-y-auto">
-                      {gameInsights.map((insight, i) => (
-                        <div key={i} className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
-                          <p className="text-xs text-emerald-400 font-semibold uppercase tracking-wider mb-1">
-                            {insight.insight_type}
-                          </p>
-                          <p className="text-gray-300 text-sm">{insight.description}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+              )}
             </div>
           </div>
-        )}
-      </PageWrapper>
-    );
-  };
-
-  // ============================================
-  // OTHER PAGES (abbreviated for space)
-  // Include PlayersPage, VideosPage, AICoachPage, etc. from your original file
-  // They're identical to what you had
-  // ============================================
+        </div>
+      )}
+    </PageWrapper>
+  );
+};
 
   // Page Router
   const renderPage = () => {
