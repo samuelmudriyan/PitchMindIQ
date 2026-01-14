@@ -6,7 +6,7 @@ import DrillDetailPage from './DrillDetailPage';
 import FormationCreator from './Formationcreator';
 import DrillsPage from './DrillsPage';
 import { drillsData } from './DrillData';
-import ManualTaggingPage from './components/ManualTaggingPage';
+import ManualTaggingPage from './ManualTaggingPage';
 
 const API_BASE = 'https://pitchmind-backend-production-483d.up.railway.app';
 
