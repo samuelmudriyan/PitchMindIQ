@@ -6,6 +6,7 @@ import DrillDetailPage from './DrillDetailPage';
 import FormationCreator from './Formationcreator';
 import DrillsPage from './DrillsPage';
 import { drillsData } from './DrillData';
+import ManualTaggingPage from './components/ManualTaggingPage';
 
 const API_BASE = 'https://pitchmind-backend-production-483d.up.railway.app';
 
@@ -1602,6 +1603,16 @@ useEffect(() => {
   // Page Router
   const renderPage = () => {
     switch(currentPage) {
+        case 'manualTagging': 
+  return (
+    <ManualTaggingPage 
+      user={user}
+      sidebarCollapsed={sidebarCollapsed}
+      setCurrentPage={setCurrentPage}
+      taggedGames={taggedGames}
+      setTaggedGames={setTaggedGames}
+    />
+  );
       case 'manualTagging': return <ManualTaggingPage />;
       // Add all your other pages here...
       // case 'players': return <PlayersPage />;
