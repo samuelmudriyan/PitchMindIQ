@@ -651,8 +651,6 @@ export default function PitchMindApp() {
   const [gamePlayers, setGamePlayers] = useState([]);
   const [gameEvents, setGameEvents] = useState([]);
   const [gameInsights, setGameInsights] = useState([]);
-  const [gameEvents, setGameEvents] = useState([]);
-  const [gameInsights, setGameInsights] = useState([]);
   const [taggingMode, setTaggingMode] = useState(false);
   const gameVideoRef = useRef(null);
   
