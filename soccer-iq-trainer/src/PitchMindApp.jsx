@@ -652,7 +652,7 @@ export default function PitchMindApp() {
   const [gameEvents, setGameEvents] = useState([]);
   const [gameInsights, setGameInsights] = useState([]);
   const [taggingMode, setTaggingMode] = useState(false);
-  const gameVideoRef = useRef(null);
+  
   
   const [showModal, setShowModal] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
