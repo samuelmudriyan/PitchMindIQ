@@ -1272,8 +1272,9 @@ useEffect(() => {
     </PageWrapper>
   );
 
- // ============================================
-// MANUAL TAGGING PAGE
+// ============================================
+// ENHANCED MANUAL TAGGING PAGE
+// Features: Video preservation, player tagging, 2D field position
 // ============================================
 const ManualTaggingPage = () => {
   const [uploadingGame, setUploadingGame] = useState(false);
@@ -1281,6 +1282,19 @@ const ManualTaggingPage = () => {
   const [loadingGame, setLoadingGame] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const gameUploadInputRef = useRef(null);
+  
+  // Player selection for tags
+  const [selectedPlayerId, setSelectedPlayerId] = useState(null);
+  const [showPlayerSelect, setShowPlayerSelect] = useState(false);
+  
+  // Field position tracking
+  const [showFieldOverlay, setShowFieldOverlay] = useState(false);
+  const [pendingTag, setPendingTag] = useState(null); // { eventType, timestamp, playerId }
+  
+  // Get players for dropdown
+  const availablePlayers = players.filter(p => 
+    !selectedTeamFilter || selectedTeamFilter === 'all' || p.teamId === selectedTeamFilter
+  );
   
   const handleUploadGame = async (e) => {
     const file = e.target.files?.[0];
@@ -1319,10 +1333,14 @@ const ManualTaggingPage = () => {
     }
   };
   
-  const addEventTag = async (eventType) => {
+  const addEventTag = async (eventType, fieldPosition = null) => {
     if (!gameVideoRef.current || !currentGame) return;
     
     const timestamp = gameVideoRef.current.currentTime;
+    const wasPlaying = !gameVideoRef.current.paused;
+    
+    // Get player info if selected
+    const player = selectedPlayerId ? players.find(p => p.id === selectedPlayerId) : null;
     
     try {
       const response = await fetch(`${API_BASE}/api/tagged-games/${currentGame.id}/events`, {
@@ -1331,20 +1349,79 @@ const ManualTaggingPage = () => {
           'Authorization': `Bearer ${user.id}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ gamePlayerId: null, timestamp, eventType, notes: '' })
+        body: JSON.stringify({ 
+          gamePlayerId: selectedPlayerId,
+          timestamp, 
+          eventType,
+          notes: fieldPosition ? `Field: ${fieldPosition.zone} (${fieldPosition.x}, ${fieldPosition.y})` : '',
+          fieldPosition: fieldPosition || null
+        })
       });
       
       if (!response.ok) throw new Error('Failed to add tag');
       
       const event = await response.json();
+      
+      // Add player info to event for display
+      if (player) {
+        event.player_name = player.name;
+        event.jersey_number = player.jerseyNumber;
+        event.player_position = player.position;
+      }
+      
       setGameEvents(prev => [...prev, event].sort((a, b) => a.timestamp - b.timestamp));
       
       const newCount = (currentGame.tags_count || 0) + 1;
       setCurrentGame(prev => ({ ...prev, tags_count: newCount }));
       setTaggedGames(prev => prev.map(g => g.id === currentGame.id ? { ...g, tags_count: newCount } : g));
+      
+      // Visual feedback without stopping video
+      const video = gameVideoRef.current;
+      const flash = document.createElement('div');
+      flash.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(34,197,94,0.3);pointer-events:none;z-index:50;';
+      video.parentElement.style.position = 'relative';
+      video.parentElement.appendChild(flash);
+      setTimeout(() => flash.remove(), 150);
+      
+      // Resume playing if it was playing
+      if (wasPlaying) {
+        video.play().catch(e => console.log('Autoplay prevented'));
+      }
+      
+      console.log('✅ Tag added:', event);
     } catch (err) {
       alert('Failed to add tag: ' + err.message);
     }
+  };
+  
+  const handleQuickTag = (eventType) => {
+    if (!selectedPlayerId) {
+      setShowPlayerSelect(true);
+      return;
+    }
+    
+    // Show field overlay for position selection
+    setPendingTag({ eventType, timestamp: gameVideoRef.current?.currentTime });
+    setShowFieldOverlay(true);
+  };
+  
+  const handleFieldClick = (x, y) => {
+    if (!pendingTag) return;
+    
+    // Determine field zone based on coordinates
+    const zone = getFieldZone(x, y);
+    const fieldPosition = { x, y, zone };
+    
+    addEventTag(pendingTag.eventType, fieldPosition);
+    setShowFieldOverlay(false);
+    setPendingTag(null);
+  };
+  
+  const getFieldZone = (x, y) => {
+    // Field is 100x68 (standard proportions)
+    if (x < 33) return y < 34 ? 'Def Left' : 'Def Right';
+    if (x < 67) return y < 34 ? 'Mid Left' : 'Mid Right';
+    return y < 34 ? 'Att Left' : 'Att Right';
   };
   
   const deleteEventTag = async (eventId) => {
@@ -1407,7 +1484,6 @@ const ManualTaggingPage = () => {
       
       if (!data.video_url) throw new Error('No video URL');
       
-      // CRITICAL: Set everything at once to prevent race conditions
       setCurrentGame(data);
       setGameEvents(data.events || []);
       setGameInsights(data.insights || []);
@@ -1449,18 +1525,179 @@ const ManualTaggingPage = () => {
     setGameEvents([]);
     setGameInsights([]);
     setTaggingMode(false);
+    setSelectedPlayerId(null);
   };
   
-  // Debug: Log whenever taggingMode changes
-  useEffect(() => {
-    console.log('🔄 taggingMode changed to:', taggingMode);
-  }, [taggingMode]);
+  // 2D Soccer Field Component
+  const SoccerField = ({ onFieldClick, events = [] }) => {
+    const [hoveredZone, setHoveredZone] = useState(null);
+    
+    const handleClick = (e) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 100;
+      const y = ((e.clientY - rect.top) / rect.height) * 100;
+      onFieldClick(x, y);
+    };
+    
+    return (
+      <div className="relative w-full aspect-[3/2] bg-emerald-800 rounded-xl overflow-hidden cursor-crosshair" onClick={handleClick}>
+        {/* Field markings */}
+        <svg className="absolute inset-0 w-full h-full" viewBox="0 0 300 200">
+          {/* Outer boundary */}
+          <rect x="5" y="5" width="290" height="190" fill="none" stroke="white" strokeWidth="2" opacity="0.6" />
+          
+          {/* Center line */}
+          <line x1="150" y1="5" x2="150" y2="195" stroke="white" strokeWidth="2" opacity="0.6" />
+          
+          {/* Center circle */}
+          <circle cx="150" cy="100" r="20" fill="none" stroke="white" strokeWidth="2" opacity="0.6" />
+          <circle cx="150" cy="100" r="2" fill="white" opacity="0.6" />
+          
+          {/* Penalty boxes */}
+          <rect x="5" y="50" width="35" height="100" fill="none" stroke="white" strokeWidth="2" opacity="0.6" />
+          <rect x="260" y="50" width="35" height="100" fill="none" stroke="white" strokeWidth="2" opacity="0.6" />
+          
+          {/* Goal boxes */}
+          <rect x="5" y="75" width="15" height="50" fill="none" stroke="white" strokeWidth="2" opacity="0.6" />
+          <rect x="280" y="75" width="15" height="50" fill="none" stroke="white" strokeWidth="2" opacity="0.6" />
+          
+          {/* Goals */}
+          <rect x="0" y="85" width="5" height="30" fill="white" opacity="0.4" />
+          <rect x="295" y="85" width="5" height="30" fill="white" opacity="0.4" />
+          
+          {/* Zone labels (subtle) */}
+          <text x="50" y="60" fill="white" opacity="0.3" fontSize="10" textAnchor="middle">DEF</text>
+          <text x="150" y="60" fill="white" opacity="0.3" fontSize="10" textAnchor="middle">MID</text>
+          <text x="250" y="60" fill="white" opacity="0.3" fontSize="10" textAnchor="middle">ATT</text>
+        </svg>
+        
+        {/* Event markers */}
+        {events.map((event, i) => {
+          const pos = event.field_position || event.fieldPosition;
+          if (!pos) return null;
+          
+          const getEventColor = (type) => {
+            if (type === 'goal') return '#10b981';
+            if (type === 'shot') return '#f59e0b';
+            if (type === 'pass') return '#3b82f6';
+            if (type === 'tackle') return '#ef4444';
+            return '#8b5cf6';
+          };
+          
+          return (
+            <div
+              key={i}
+              className="absolute w-3 h-3 rounded-full border-2 border-white transform -translate-x-1/2 -translate-y-1/2 animate-pulse"
+              style={{
+                left: `${pos.x}%`,
+                top: `${pos.y}%`,
+                backgroundColor: getEventColor(event.event_type)
+              }}
+              title={`${event.event_type} - ${event.player_name || 'Unknown'}`}
+            />
+          );
+        })}
+        
+        {/* Click instruction */}
+        <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 bg-black/60 px-3 py-1 rounded-full text-white text-xs">
+          Click to mark position
+        </div>
+      </div>
+    );
+  };
+  
+  // Player Selection Modal
+  const PlayerSelectModal = () => (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={() => setShowPlayerSelect(false)}>
+      <div className="bg-[#0d1210] border border-white/10 rounded-2xl p-6 max-w-md w-full max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-bold text-white">Select Player</h3>
+          <button onClick={() => setShowPlayerSelect(false)} className="text-gray-400 hover:text-white">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        
+        {availablePlayers.length === 0 ? (
+          <div className="text-center py-8 text-gray-400">
+            <Users className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <p>No players in your roster.</p>
+            <button onClick={() => { setShowPlayerSelect(false); setShowModal('player'); }} className="mt-3 text-emerald-400 hover:underline">
+              Add a player first
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {availablePlayers.map(player => (
+              <button
+                key={player.id}
+                onClick={() => {
+                  setSelectedPlayerId(player.id);
+                  setShowPlayerSelect(false);
+                }}
+                className={`w-full flex items-center space-x-3 p-3 rounded-xl transition-all text-left ${
+                  selectedPlayerId === player.id
+                    ? 'bg-emerald-500/20 border-2 border-emerald-500/50'
+                    : 'bg-white/5 border border-white/10 hover:border-emerald-500/30'
+                }`}
+              >
+                <JerseyBadge number={player.jerseyNumber || '?'} color={player.jerseyColor} size="sm" />
+                <div className="flex-1">
+                  <p className="font-semibold text-white">{player.name}</p>
+                  <p className="text-gray-400 text-sm">{player.position}</p>
+                </div>
+                {selectedPlayerId === player.id && <Check className="w-5 h-5 text-emerald-400" />}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+  
+  // Field Position Modal
+  const FieldPositionModal = () => (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={() => { setShowFieldOverlay(false); setPendingTag(null); }}>
+      <div className="bg-[#0d1210] border border-white/10 rounded-2xl p-6 max-w-3xl w-full" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-4">
+          <div>
+            <h3 className="text-lg font-bold text-white">Mark Field Position</h3>
+            <p className="text-gray-400 text-sm">Click where the {pendingTag?.eventType} happened</p>
+          </div>
+          <button onClick={() => { setShowFieldOverlay(false); setPendingTag(null); }} className="text-gray-400 hover:text-white">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        
+        <SoccerField onFieldClick={handleFieldClick} events={gameEvents} />
+        
+        <div className="mt-4 flex justify-between items-center">
+          <button
+            onClick={() => {
+              addEventTag(pendingTag.eventType, null);
+              setShowFieldOverlay(false);
+              setPendingTag(null);
+            }}
+            className="text-gray-400 hover:text-white text-sm"
+          >
+            Skip position →
+          </button>
+          
+          <div className="flex gap-2 text-xs">
+            <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-emerald-500"></div>Goal</div>
+            <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-amber-500"></div>Shot</div>
+            <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-blue-500"></div>Pass</div>
+            <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-red-500"></div>Tackle</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
   
   return (
     <PageWrapper title="Manual Tagging" sidebarCollapsed={sidebarCollapsed} currentPage="manualTagging" setCurrentPage={setCurrentPage}>
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-white mb-2">Manual Game Tagging</h2>
-        <p className="text-gray-400">Upload games, tag events, let AI analyze patterns.</p>
+        <p className="text-gray-400">Upload games, tag events with players and field positions, let AI analyze patterns.</p>
         <button onClick={() => setShowDebug(!showDebug)} className="mt-2 text-xs text-gray-500 hover:text-gray-400">
           {showDebug ? 'Hide' : 'Show'} Debug
         </button>
@@ -1470,7 +1707,7 @@ const ManualTaggingPage = () => {
         <div className="mb-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-xs text-yellow-400 space-y-1">
           <div>taggingMode: <strong>{String(taggingMode)}</strong></div>
           <div>currentGame: <strong>{currentGame?.id || 'null'}</strong></div>
-          <div>video_url: <strong>{currentGame?.video_url ? '✓ present' : '✗ missing'}</strong></div>
+          <div>selectedPlayer: <strong>{selectedPlayerId ? players.find(p => p.id === selectedPlayerId)?.name : 'none'}</strong></div>
           <div>events: <strong>{gameEvents.length}</strong></div>
         </div>
       )}
@@ -1528,20 +1765,58 @@ const ManualTaggingPage = () => {
             </button>
           </div>
           
+          {/* Player Selection Bar */}
+          <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <User className="w-5 h-5 text-gray-400" />
+                <span className="text-gray-400 text-sm">Tagging as:</span>
+                {selectedPlayerId ? (
+                  <div className="flex items-center space-x-2">
+                    <JerseyBadge 
+                      number={players.find(p => p.id === selectedPlayerId)?.jerseyNumber || '?'} 
+                      color={players.find(p => p.id === selectedPlayerId)?.jerseyColor} 
+                      size="sm" 
+                    />
+                    <span className="text-white font-semibold">
+                      {players.find(p => p.id === selectedPlayerId)?.name}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-gray-500 italic">No player selected</span>
+                )}
+              </div>
+              <button 
+                onClick={() => setShowPlayerSelect(true)}
+                className="px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 text-sm font-medium"
+              >
+                {selectedPlayerId ? 'Change Player' : 'Select Player'}
+              </button>
+            </div>
+          </div>
+          
           <div className="grid lg:grid-cols-2 gap-4">
             <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
               {currentGame?.video_url ? (
                 <>
-                  <video ref={gameVideoRef} src={currentGame.video_url} className="w-full bg-black" controls />
+                  <div className="relative">
+                    <video ref={gameVideoRef} src={currentGame.video_url} className="w-full bg-black" controls />
+                  </div>
                   <div className="p-4">
+                    <h4 className="text-white font-semibold mb-3">Quick Tag Events</h4>
                     <div className="grid grid-cols-3 gap-2">
-                      <button onClick={() => addEventTag('pass')} className="px-3 py-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 text-sm">Pass</button>
-                      <button onClick={() => addEventTag('shot')} className="px-3 py-2 bg-amber-500/20 text-amber-400 rounded-lg hover:bg-amber-500/30 text-sm">Shot</button>
-                      <button onClick={() => addEventTag('tackle')} className="px-3 py-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 text-sm">Tackle</button>
-                      <button onClick={() => addEventTag('turnover')} className="px-3 py-2 bg-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/30 text-sm">Turnover</button>
-                      <button onClick={() => addEventTag('goal')} className="px-3 py-2 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 text-sm">Goal</button>
-                      <button onClick={() => addEventTag('dribble')} className="px-3 py-2 bg-cyan-500/20 text-cyan-400 rounded-lg hover:bg-cyan-500/30 text-sm">Dribble</button>
+                      <button onClick={() => handleQuickTag('pass')} className="px-3 py-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 text-sm font-medium">⚽ Pass</button>
+                      <button onClick={() => handleQuickTag('shot')} className="px-3 py-2 bg-amber-500/20 text-amber-400 rounded-lg hover:bg-amber-500/30 text-sm font-medium">🎯 Shot</button>
+                      <button onClick={() => handleQuickTag('tackle')} className="px-3 py-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 text-sm font-medium">🛡️ Tackle</button>
+                      <button onClick={() => handleQuickTag('turnover')} className="px-3 py-2 bg-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/30 text-sm font-medium">⚠️ Turnover</button>
+                      <button onClick={() => handleQuickTag('goal')} className="px-3 py-2 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 text-sm font-medium">🥅 Goal</button>
+                      <button onClick={() => handleQuickTag('dribble')} className="px-3 py-2 bg-cyan-500/20 text-cyan-400 rounded-lg hover:bg-cyan-500/30 text-sm font-medium">🏃 Dribble</button>
                     </div>
+                    {!selectedPlayerId && (
+                      <p className="mt-3 text-xs text-amber-400 bg-amber-500/10 p-2 rounded">
+                        💡 Select a player above to start tagging
+                      </p>
+                    )}
                   </div>
                 </>
               ) : (
@@ -1568,7 +1843,21 @@ const ManualTaggingPage = () => {
                   ) : (
                     gameEvents.map(e => (
                       <div key={e.id} className="flex justify-between items-center p-2 bg-white/5 rounded group">
-                        <span className="text-white text-sm capitalize">{e.event_type} <span className="text-gray-500 text-xs">{formatTime(e.timestamp)}</span></span>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            {e.jersey_number && (
+                              <span className="text-xs bg-white/10 px-1.5 py-0.5 rounded">#{e.jersey_number}</span>
+                            )}
+                            <span className="text-white text-sm capitalize font-medium">{e.event_type}</span>
+                            <span className="text-gray-500 text-xs">{formatTime(e.timestamp)}</span>
+                          </div>
+                          {e.player_name && (
+                            <p className="text-gray-400 text-xs mt-0.5">{e.player_name} • {e.player_position || 'Player'}</p>
+                          )}
+                          {e.notes && e.notes.includes('Field:') && (
+                            <p className="text-blue-400 text-xs mt-0.5">{e.notes.split('Field: ')[1]}</p>
+                          )}
+                        </div>
                         <button onClick={() => deleteEventTag(e.id)} className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400">
                           <X className="w-4 h-4" />
                         </button>
@@ -1597,6 +1886,10 @@ const ManualTaggingPage = () => {
           </div>
         </div>
       )}
+      
+      {/* Modals */}
+      {showPlayerSelect && <PlayerSelectModal />}
+      {showFieldOverlay && <FieldPositionModal />}
     </PageWrapper>
   );
 };
