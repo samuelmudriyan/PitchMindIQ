@@ -207,6 +207,7 @@ async function initDatabase() {
         timestamp FLOAT,
         event_type VARCHAR(50),
         notes TEXT,
+        field_position JSONB,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -935,7 +936,7 @@ app.post('/api/tagged-games/:gameId/players', authMiddleware, async (req, res) =
 // Add event tag
 app.post('/api/tagged-games/:gameId/events', authMiddleware, async (req, res) => {
   try {
-    const { gamePlayerId, timestamp, eventType, notes } = req.body;
+    const { gamePlayerId, timestamp, eventType, notes, fieldPosition } = req.body;
     
     // Verify game belongs to user
     const gameCheck = await pool.query(
@@ -948,10 +949,10 @@ app.post('/api/tagged-games/:gameId/events', authMiddleware, async (req, res) =>
     }
     
     const result = await pool.query(
-      `INSERT INTO game_events (game_id, game_player_id, timestamp, event_type, notes)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO game_events (game_id, game_player_id, timestamp, event_type, notes, field_position)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [req.params.gameId, gamePlayerId, timestamp, eventType, notes]
+      [req.params.gameId, gamePlayerId, timestamp, eventType, notes, fieldPosition ? JSON.stringify(fieldPosition) : null]
     );
     
     // Update tags count
