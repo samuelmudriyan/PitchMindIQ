@@ -5,13 +5,25 @@ import logo from './assets/logo.png';
 import DrillDetailPage from './DrillDetailPage';
 import DrillsPage from './DrillsPage';
 import { drillsData } from './DrillData';
+import FormationCreator from './Formationcreator';
 import ManualTaggingPage from './ManualTaggingPage';
 
 const API_BASE = 'https://pitchmind-backend-production-483d.up.railway.app';
 
-const STORAGE_KEYS = { PLAYERS: 'pitchmind_players', VIDEOS: 'pitchmind_videos', SESSIONS: 'pitchmind_sessions', REPORTS: 'pitchmind_reports', CHAT_HISTORY: 'pitchmind_chat_history' };
-const loadFromStorage = (key, defaultValue = []) => { try { const saved = localStorage.getItem(key); return saved ? JSON.parse(saved) : defaultValue; } catch { return defaultValue; } };
-const saveToStorage = (key, data) => { localStorage.setItem(key, JSON.stringify(data)); };
+const apiCall = async (endpoint, clerkUserId, options = {}) => {
+  const response = await fetch(`${API_BASE}${endpoint}`, { ...options, headers: { 'Authorization': `Bearer ${clerkUserId}`, 'Content-Type': 'application/json', ...options.headers } });
+  if (!response.ok) throw new Error(`API call failed: ${response.statusText}`);
+  return response.json();
+};
+
+const loadFromStorage = (key, userId, defaultValue = []) => {
+  if (!userId) return defaultValue;
+  try { const saved = localStorage.getItem(`pitchmind_${key}_${userId}`); return saved ? JSON.parse(saved) : defaultValue; } catch { return defaultValue; }
+};
+const saveToStorage = (key, userId, data) => {
+  if (!userId) return;
+  localStorage.setItem(`pitchmind_${key}_${userId}`, JSON.stringify(data));
+};
 
 // Jersey color options
 const JERSEY_COLORS = [
@@ -459,7 +471,9 @@ const Sidebar = ({ currentPage, setCurrentPage, sidebarCollapsed, setSidebarColl
         <SidebarItem icon={Clipboard} label="Session Planner" active={currentPage === 'planner'} onClick={() => setCurrentPage('planner')} />
         <SidebarItem icon={FileText} label="Auto Reports" active={currentPage === 'reports'} onClick={() => setCurrentPage('reports')} />
         <SidebarItem icon={BookOpen} label="Drill Library" active={currentPage === 'drills' || currentPage === 'drillDetail'} onClick={() => setCurrentPage('drills')} />
+        <SidebarItem icon={Tag} label="Manual Tagging" active={currentPage === 'manualTagging'} onClick={() => setCurrentPage('manualTagging')} badge="New"/>
         {!sidebarCollapsed && <div className="pt-4 pb-2"><div className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-3">Analytics</div></div>}
+        <SidebarItem icon={Target} label="Formations" active={currentPage === 'formations'} onClick={() => setCurrentPage('formations')}/>
         <SidebarItem icon={BarChart3} label="Team Stats" active={currentPage === 'stats'} onClick={() => setCurrentPage('stats')} />
         <SidebarItem icon={TrendingUp} label="Progress" active={currentPage === 'progress'} onClick={() => setCurrentPage('progress')} />
         <SidebarItem icon={Target} label="Benchmarks" active={currentPage === 'benchmarks'} onClick={() => setCurrentPage('benchmarks')} />
@@ -594,12 +608,19 @@ export default function PitchMindApp() {
   const [activeClipIndex, setActiveClipIndex] = useState(null);
   const clipTimeoutRef = useRef(null);
   
-  const [players, setPlayers] = useState(() => loadFromStorage(STORAGE_KEYS.PLAYERS, []));
-  const [videos, setVideos] = useState(() => loadFromStorage(STORAGE_KEYS.VIDEOS, []));
-  const [sessions, setSessions] = useState(() => loadFromStorage(STORAGE_KEYS.SESSIONS, []));
+  const [players, setPlayers] = useState(() => loadFromStorage('players', user?.id, []));
+  const [videos, setVideos] = useState(() => loadFromStorage('videos', user?.id, []));
+  const [sessions, setSessions] = useState(() => loadFromStorage('sessions', user?.id, []));
   const [taggedGames, setTaggedGames] = useState([]);
-  const [reports, setReports] = useState(() => loadFromStorage(STORAGE_KEYS.REPORTS, []));
-  const [chatHistory, setChatHistory] = useState(() => loadFromStorage(STORAGE_KEYS.CHAT_HISTORY, []));
+  const [teams, setTeams] = useState([]);
+  const [savedFormations, setSavedFormations] = useState([]);
+  const [dataSynced, setDataSynced] = useState(false);
+  const [teamsnapToken, setTeamsnapToken] = useState(() => localStorage.getItem('teamsnap_token'));
+  const [teamsnapTeams, setTeamsnapTeams] = useState([]);
+  const [teamsnapLoading, setTeamsnapLoading] = useState(false);
+  const gameVideoRef = useRef(null);
+  const [reports, setReports] = useState(() => loadFromStorage('reports', user?.id, []));
+  const [chatHistory, setChatHistory] = useState(() => loadFromStorage('chat_history', user?.id, []));
   
   const [showModal, setShowModal] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
@@ -609,11 +630,11 @@ export default function PitchMindApp() {
   const videoRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  useEffect(() => { saveToStorage(STORAGE_KEYS.PLAYERS, players); }, [players]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.VIDEOS, videos); }, [videos]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.SESSIONS, sessions); }, [sessions]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.REPORTS, reports); }, [reports]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.CHAT_HISTORY, chatHistory); }, [chatHistory]);
+  useEffect(() => { saveToStorage('players', user?.id, players); }, [players]);
+  useEffect(() => { saveToStorage('videos', user?.id, videos); }, [videos]);
+  useEffect(() => { saveToStorage('sessions', user?.id, sessions); }, [sessions]);
+  useEffect(() => { saveToStorage('reports', user?.id, reports); }, [reports]);
+  useEffect(() => { saveToStorage('chat_history', user?.id, chatHistory); }, [chatHistory]);
 
   useEffect(() => { return () => { if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current); }; }, []);
 
@@ -662,6 +683,69 @@ export default function PitchMindApp() {
     }));
   };
 
+
+  // ── TeamSnap Functions ────────────────────────────────────────────────────
+  const connectTeamSnap = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/teamsnap/auth`);
+      const data = await res.json();
+      if (data.authUrl) window.location.href = data.authUrl;
+      else alert('TeamSnap not configured on backend.');
+    } catch(err) { console.error('TeamSnap auth error:', err); }
+  };
+
+  const fetchTeamsnapTeams = async () => {
+    if (!teamsnapToken) return;
+    setTeamsnapLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/teamsnap/teams`, { headers: { 'Authorization': `Bearer ${teamsnapToken}` } });
+      if (res.ok) { const data = await res.json(); setTeamsnapTeams(data.teams||[]); }
+      else if (res.status===401) { localStorage.removeItem('teamsnap_token'); setTeamsnapToken(null); }
+    } catch(err) { console.error('Failed to fetch teams:', err); }
+    setTeamsnapLoading(false);
+  };
+
+  const fetchTeamsnapRoster = async (teamId) => {
+    if (!teamsnapToken) return [];
+    try {
+      const res = await fetch(`${API_BASE}/api/teamsnap/roster/${teamId}`, { headers: { 'Authorization': `Bearer ${teamsnapToken}` } });
+      if (res.ok) { const data = await res.json(); return data.players||[]; }
+    } catch(err) { console.error('Failed to fetch roster:', err); }
+    return [];
+  };
+
+  const mapTeamsnapPosition = (pos) => {
+    if (!pos) return 'Midfielder';
+    const p = pos.toLowerCase();
+    if (p.includes('goal')||p.includes('keeper')) return 'Goalkeeper';
+    if (p.includes('def')||p.includes('back')) return 'Defender';
+    if (p.includes('forward')||p.includes('striker')||p.includes('wing')) return 'Forward';
+    return 'Midfielder';
+  };
+
+  const importTeamsnapPlayers = async (teamsnapPlayers, selectedIds, teamInfo) => {
+    const toImport = teamsnapPlayers.filter(p => selectedIds.includes(p.id));
+    const existingIds = players.filter(p=>p.teamsnapId).map(p=>String(p.teamsnapId));
+    const newPlayers = toImport.filter(p=>!existingIds.includes(String(p.id))).map(p => ({
+      id: Date.now()+Math.random(), name: p.name, position: mapTeamsnapPosition(p.position),
+      age: 0, jerseyNumber: p.jerseyNumber, jerseyColor: '#10b981', rating: 70, trend: 'same',
+      teamsnapId: String(p.id), importedFrom: 'teamsnap', teamName: teamInfo?.name, analyses: []
+    }));
+    if (newPlayers.length > 0) setPlayers(prev => [...prev, ...newPlayers]);
+    return newPlayers.length;
+  };
+
+  const disconnectTeamSnap = () => { localStorage.removeItem('teamsnap_token'); setTeamsnapToken(null); setTeamsnapTeams([]); };
+
+  // TeamSnap OAuth callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('teamsnap_token');
+    const err = params.get('teamsnap_error');
+    if (token) { setTeamsnapToken(token); localStorage.setItem('teamsnap_token', token); window.history.replaceState({}, '', window.location.pathname); setShowModal('teamsnapImport'); }
+    if (err) { window.history.replaceState({}, '', window.location.pathname); }
+  }, []);
+
   const handleExportReport = async () => {
     try {
       await generatePDFReport(analysisResults, videoFile?.name, players, user?.firstName, trackedPlayer);
@@ -707,6 +791,13 @@ export default function PitchMindApp() {
     return (
       <Modal title={editingItem ? 'Edit Player' : 'Add New Player'} onClose={() => { setShowModal(null); setEditingItem(null); }} wide>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {!editingItem && (
+            <div className="mb-2">
+              {teamsnapToken ? <button type="button" onClick={() => setShowModal('teamsnapImport')} className="w-full flex items-center justify-center space-x-3 p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl text-blue-400 hover:bg-blue-500/20"><Link2 className="w-5 h-5"/><span className="font-semibold">Import from TeamSnap</span></button>
+              : <button type="button" onClick={connectTeamSnap} className="w-full flex items-center justify-center space-x-3 p-4 bg-white/5 border border-white/10 rounded-xl text-gray-300 hover:border-blue-500/30 hover:bg-blue-500/5"><Link2 className="w-5 h-5"/><span>Connect TeamSnap to import roster</span></button>}
+              <div className="flex items-center my-4"><div className="flex-1 border-t border-white/10"></div><span className="px-4 text-gray-500 text-sm">or add manually</span><div className="flex-1 border-t border-white/10"></div></div>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
               <label className="block text-sm font-medium text-gray-400 mb-2">Full Name *</label>
@@ -1457,6 +1548,26 @@ export default function PitchMindApp() {
 
   // Page Router
 
+
+  const TeamsnapImportModal = () => {
+    const [step, setStep] = useState(teamsnapTeams.length > 0 ? 'selectTeam' : 'loading');
+    const [selectedTeam, setSelectedTeam] = useState(null);
+    const [roster, setRoster] = useState([]);
+    const [selectedIds, setSelectedIds] = useState([]);
+    const [importing, setImporting] = useState(false);
+    useEffect(() => { if (step==='loading') fetchTeamsnapTeams().then(()=>setStep('selectTeam')); }, []);
+    useEffect(() => { if (teamsnapTeams.length>0&&step==='loading') setStep('selectTeam'); }, [teamsnapTeams]);
+    const handleSelectTeam = async (team) => { setSelectedTeam(team); setStep('loadingRoster'); const r = await fetchTeamsnapRoster(team.id); setRoster(r); setSelectedIds(r.map(p=>p.id)); setStep('selectPlayers'); };
+    const handleImport = async () => { setImporting(true); const count = await importTeamsnapPlayers(roster, selectedIds, selectedTeam); setImporting(false); setShowModal(null); alert(`Imported ${count} players from ${selectedTeam?.name}!`); };
+    return (
+      <Modal title="Import from TeamSnap" onClose={()=>setShowModal(null)} wide>
+        {step==='loading'||step==='loadingRoster' ? <div className="text-center py-12"><Loader2 className="w-10 h-10 text-emerald-400 animate-spin mx-auto mb-4"/><p className="text-gray-400">{step==='loadingRoster'?'Loading roster...':'Connecting to TeamSnap...'}</p></div>
+        : step==='selectTeam' ? <div className="space-y-3"><p className="text-gray-400 mb-4">Select a team to import:</p>{teamsnapTeams.length===0?<div className="text-center py-8 text-gray-400">No teams found in TeamSnap.</div>:teamsnapTeams.map(team=><button key={team.id} onClick={()=>handleSelectTeam(team)} className="w-full flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-xl hover:border-blue-500/30 hover:bg-blue-500/5 text-left group"><div><p className="font-bold text-white group-hover:text-blue-400">{team.name}</p><p className="text-gray-500 text-sm">{team.divisionName||team.seasonName||'TeamSnap Team'}</p></div><ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-blue-400"/></button>)}<div className="pt-4 border-t border-white/10"><button onClick={disconnectTeamSnap} className="text-gray-500 hover:text-red-400 text-sm">Disconnect TeamSnap</button></div></div>
+        : <div className="space-y-3"><div className="flex items-center justify-between mb-4"><p className="text-gray-400">{roster.length} players in {selectedTeam?.name}</p><button onClick={()=>setSelectedIds(selectedIds.length===roster.length?[]:roster.map(p=>p.id))} className="text-emerald-400 text-sm hover:underline">{selectedIds.length===roster.length?'Deselect all':'Select all'}</button></div><div className="max-h-72 overflow-y-auto space-y-2">{roster.map(p=><div key={p.id} onClick={()=>setSelectedIds(prev=>prev.includes(p.id)?prev.filter(x=>x!==p.id):[...prev,p.id])} className={`flex items-center space-x-3 p-3 rounded-xl cursor-pointer transition-all ${selectedIds.includes(p.id)?'bg-emerald-500/20 border border-emerald-500/30':'bg-white/5 border border-white/10 hover:border-white/20'}`}><div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 ${selectedIds.includes(p.id)?'bg-emerald-500 border-emerald-500':'border-white/20'}`}>{selectedIds.includes(p.id)&&<Check className="w-3 h-3 text-white"/>}</div><div><p className="font-medium text-white">{p.name}</p><p className="text-gray-500 text-xs">{p.position||'Unknown'}{p.jerseyNumber?` • #${p.jerseyNumber}`:''}</p></div></div>)}</div><div className="flex space-x-3 pt-4"><button onClick={()=>setStep('selectTeam')} className="flex-1 py-3 border border-white/20 text-gray-300 rounded-xl hover:bg-white/5">Back</button><button onClick={handleImport} disabled={selectedIds.length===0||importing} className="flex-1 py-3 bg-blue-500 hover:bg-blue-400 disabled:bg-gray-600 text-white rounded-xl font-semibold flex items-center justify-center space-x-2">{importing?<><Loader2 className="w-4 h-4 animate-spin"/><span>Importing...</span></>:<span>Import {selectedIds.length} Players</span>}</button></div></div>}
+      </Modal>
+    );
+  };
+
   // Page Router
   const renderPage = () => {
     switch(currentPage) {
@@ -1471,6 +1582,7 @@ export default function PitchMindApp() {
       case 'stats': return <TeamStatsPage />;
       case 'progress': return <ProgressPage />;
       case 'benchmarks': return <BenchmarksPage />;
+      case 'formations': return <FormationCreator sidebarCollapsed={sidebarCollapsed} setCurrentPage={setCurrentPage} players={players} savedFormations={savedFormations} setSavedFormations={setSavedFormations}/>;
       case 'upload': return <UploadPage />;
       case 'manualTagging': return <ManualTaggingPage user={user} sidebarCollapsed={sidebarCollapsed} setCurrentPage={setCurrentPage} taggedGames={taggedGames} setTaggedGames={setTaggedGames} />;
       default: return <Dashboard />;
@@ -1486,6 +1598,7 @@ export default function PitchMindApp() {
       {showModal === 'session' && <AddSessionModal />}
       {showModal === 'report' && <GenerateReportModal />}
       {showModal === 'addToSession' && <AddToSessionModal />}
+      {showModal === 'teamsnapImport' && <TeamsnapImportModal />}
     </div>
   );
 }
