@@ -11,7 +11,9 @@ const stripeRoutes = require('./stripe-api');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Job tracking for progress updates
+// In-memory job store for async analysis tracking
+const analysisJobs = new Map(); // jobId -> { status, results, error, createdAt }
+
 // Environment variables
 // MODAL_ENDPOINT should point to the /track route of pitchmind_tracker_final
 // e.g. https://sammywassman--pitchmind-tracker-final-track-webhook.modal.run/track
@@ -1188,7 +1190,6 @@ app.get('/api/sync', authMiddleware, async (req, res) => {
 app.post('/api/analyze', upload.single('video'), async (req, res) => {
   console.log('Analysis request received');
 
-
   if (!req.file) {
     return res.status(400).json({ error: 'No video file uploaded' });
   }
@@ -1198,18 +1199,19 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
   const clickYNum = parseFloat(clickY) || 0;
   const clickTs   = parseFloat(clickTimestamp) || 0;
 
-  console.log(`Processing: ${req.file.filename}`);
-  console.log(`Click: (${clickXNum.toFixed(1)}%, ${clickYNum.toFixed(1)}%) at ${clickTs}s`);
-  if (playerName) console.log(`Tracking: ${playerName} #${jerseyNumber || '?'} color=${jerseyColor || 'unknown'}`);
+  const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  analysisJobs.set(jobId, { status: 'processing', results: null, error: null, createdAt: Date.now() });
 
   const videoUrl = `${BACKEND_URL}/uploads/${req.file.filename}`;
-  console.log(`Video URL for Modal: ${videoUrl}`);
+  console.log(`Job ${jobId} started — ${req.file.filename}`);
+  console.log(`Click: (${clickXNum.toFixed(1)}%, ${clickYNum.toFixed(1)}%) at ${clickTs}s`);
 
+  // Return jobId immediately — process Modal in background
+  res.json({ jobId });
+
+  // Background processing
   const cleanupTimer = setTimeout(() => {
-    fs.unlink(req.file.path, (err) => {
-      if (err) console.error('Delayed cleanup failed:', err);
-      else console.log(`Cleaned up: ${req.file.filename}`);
-    });
+    fs.unlink(req.file.path, () => {});
   }, 30 * 60 * 1000);
 
   try {
@@ -1224,7 +1226,7 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
       jersey_color:    jerseyColor  || null,
     };
 
-    console.log('Sending to Modal tracker...');
+    console.log(`Job ${jobId}: sending to Modal...`);
     const modalResponse = await fetch(MODAL_ENDPOINT, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1233,26 +1235,33 @@ app.post('/api/analyze', upload.single('video'), async (req, res) => {
     });
 
     clearTimeout(cleanupTimer);
-    fs.unlink(req.file.path, (err) => {
-      if (err) console.error('Failed to delete temp file:', err);
-    });
+    fs.unlink(req.file.path, () => {});
 
     if (!modalResponse.ok) {
       const errText = await modalResponse.text();
-      console.error('Modal error:', modalResponse.status, errText);
-      return res.status(500).json({ error: 'Analysis failed', details: errText });
+      console.error(`Job ${jobId} Modal error:`, modalResponse.status, errText);
+      analysisJobs.set(jobId, { status: 'failed', error: errText, results: null });
+      return;
     }
 
     const results = await modalResponse.json();
-    console.log('Analysis complete:', results.decision_points?.length || 0, 'decision points');
+    console.log(`Job ${jobId} complete:`, results.decision_points?.length || 0, 'decision points');
+    analysisJobs.set(jobId, { status: 'completed', results, error: null });
 
-    res.json(results);
+    // Clean up job after 1 hour
+    setTimeout(() => analysisJobs.delete(jobId), 60 * 60 * 1000);
 
   } catch (error) {
     clearTimeout(cleanupTimer);
-    console.error('Analysis error:', error);
-    res.status(500).json({ error: 'Analysis failed', message: error.message });
+    console.error(`Job ${jobId} error:`, error.message);
+    analysisJobs.set(jobId, { status: 'failed', error: error.message, results: null });
   }
+});
+
+app.get('/api/analyze-status/:jobId', (req, res) => {
+  const job = analysisJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ status: 'not_found' });
+  res.json({ status: job.status, results: job.results, error: job.error });
 });
 
 // ============================================

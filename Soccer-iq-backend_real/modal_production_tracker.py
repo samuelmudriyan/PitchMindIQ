@@ -1,19 +1,18 @@
 """
-PitchMind Custom Tracker - Production Modal Worker (Modal 1.0)
-Updated for latest Modal API
+PitchMind Custom Tracker - Production Modal Worker
+Player tracking: YOLO + ByteTrack
+Decision point analysis: Claude Vision API
 """
 
 import modal
-from typing import Dict
+from typing import Dict, Optional
 import json
 import sys
 
 app = modal.App("pitchmind-production-tracker")
 
-# Volume for caching models
 model_volume = modal.Volume.from_name("pitchmind-models-v6", create_if_missing=True)
 
-# Production GPU image
 gpu_image = (
     modal.Image.debian_slim(python_version="3.10")
     .apt_install(
@@ -37,37 +36,46 @@ gpu_image = (
         "pillow",
         "requests",
         "fastapi",
-        "uvicorn"
+        "uvicorn",
+        "anthropic>=0.40.0"
     )
 )
+
+COACHING_PROMPT_TEMPLATE = """You are an elite soccer coach reviewing match footage.
+Player being analyzed: {player_label}.
+
+Look at this frame from a soccer match and identify if a meaningful soccer action or decision moment is happening involving this player.
+
+Respond ONLY with valid JSON (no markdown, no extra text):
+{{
+  "action": "receive" | "pass" | "shot" | "dribble" | "pressure" | "run" | "header" | "none",
+  "description": "one sentence describing what is happening in this moment",
+  "coaching": "one sentence of specific, actionable coaching feedback for this player",
+  "rating": 1 | 2 | 3 | 4 | 5
+}}
+
+Rating guide: 1=poor decision/execution, 3=average, 5=excellent.
+Use "none" only if the player is clearly not involved in any action in this frame."""
+
 
 @app.function(
     image=gpu_image,
     gpu="T4",
-    timeout=7200,  # 2 hours for full first-half highlights
+    timeout=7200,
     volumes={"/models": model_volume},
     memory=16384,
-    min_containers=0
+    min_containers=0,
+    secrets=[modal.Secret.from_name("anthropic")]
 )
 def track_player(
     video_url: str,
     click_x: float,
     click_y: float,
-    click_timestamp: float = 0.0
+    click_timestamp: float = 0.0,
+    player_name: Optional[str] = None,
+    jersey_number: Optional[int] = None,
+    jersey_color: Optional[str] = None,
 ) -> Dict:
-    """
-    Production tracker using ByteTrack + YOLO
-    Optimized for long videos (10-20 min highlights)
-    
-    Args:
-        video_url: URL to video file
-        click_x: X coordinate (percentage 0-100)
-        click_y: Y coordinate (percentage 0-100)
-        click_timestamp: When user clicked (seconds)
-        
-    Returns:
-        Dict with decision_points, player_tracks, video_info
-    """
     import cv2
     import numpy as np
     from ultralytics import YOLO
@@ -75,325 +83,341 @@ def track_player(
     import tempfile
     import urllib.request
     import os
-    
-    # Adaptive frame sampling helper function
+    import base64
+    import anthropic
+
     def get_sample_rate(total_frames, fps):
-        """
-        Dynamically adjust frame sampling based on video length.
-        Longer videos = more aggressive sampling to stay under 2hr limit.
-        """
-        duration_seconds = total_frames / fps
-        duration_minutes = duration_seconds / 60
-        
-        if duration_minutes < 5:
-            return 5   # High quality for short videos
+        duration_minutes = (total_frames / fps) / 60
+        if duration_minutes < 1:
+            return 1
+        elif duration_minutes < 5:
+            return 3
         elif duration_minutes < 10:
-            return 10  # Medium quality
+            return 10
         elif duration_minutes < 15:
-            return 20  # Lower quality but faster
+            return 20
         else:
-            return 30  # Very aggressive for 15+ min videos
-    
-    print(f"🎬 PitchMind Tracker Starting", file=sys.stderr)
-    print(f"   Video URL: {video_url}", file=sys.stderr)
-    print(f"   Click: ({click_x:.1f}%, {click_y:.1f}%) at {click_timestamp:.1f}s", file=sys.stderr)
-    
+            return 30
+
+    player_label = player_name if player_name else "the player you clicked on"
+    coaching_prompt = COACHING_PROMPT_TEMPLATE.format(player_label=player_label)
+
+    print(f"PitchMind Tracker Starting", file=sys.stderr)
+    print(f"  Video: {video_url}", file=sys.stderr)
+    print(f"  Click: ({click_x:.1f}%, {click_y:.1f}%) @ {click_timestamp:.1f}s", file=sys.stderr)
+    print(f"  Player: {player_label}", file=sys.stderr)
+
     try:
         # Download video
-        print(f"📥 Downloading video...", file=sys.stderr)
+        print(f"Downloading video...", file=sys.stderr)
         with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
             urllib.request.urlretrieve(video_url, tmp.name)
             video_path = tmp.name
-        print(f"✅ Video downloaded", file=sys.stderr)
-        
-        # Initialize YOLO
+        print(f"Download complete", file=sys.stderr)
+
+        # Load YOLO
         model_path = "/models/yolov8n.pt"
         if not os.path.exists(model_path):
-            print(f"📦 Downloading YOLO model...", file=sys.stderr)
+            print(f"Downloading YOLO model...", file=sys.stderr)
             model = YOLO('yolov8n.pt')
             os.makedirs("/models", exist_ok=True)
             model.save(model_path)
-            print(f"✅ Model cached", file=sys.stderr)
         else:
             model = YOLO(model_path)
-            print(f"✅ Model loaded from cache", file=sys.stderr)
-        
-        # Initialize ByteTrack
+        print(f"YOLO ready", file=sys.stderr)
+
+        # ByteTrack
         tracker = sv.ByteTrack(
             track_activation_threshold=0.25,
             lost_track_buffer=60,
             minimum_matching_threshold=0.7,
             frame_rate=30
         )
-        print(f"✅ ByteTrack initialized", file=sys.stderr)
-        
-        # Configuration
-        ROI_TOP = 120
-        ROI_BOTTOM = 670
-        GREEN_RATIO_THRESHOLD = 0.25
-        HIST_DIFF_THRESHOLD = 0.4
-        BALL_PROXIMITY_THRESHOLD = 150  # Increased from 100 to catch more interactions
-        BALL_CONFIDENCE_THRESHOLD = 0.2  # Lower threshold for ball detection (balls are small)
-        
-        # Helper: Detect replays
-        def is_replay(frame, prev_hist):
-            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-            mask_green = cv2.inRange(hsv, (35, 40, 40), (85, 255, 255))
-            green_ratio = cv2.countNonZero(mask_green) / (frame.shape[0] * frame.shape[1])
-            
-            hist = cv2.calcHist([frame], [0], None, [64], [0, 256])
-            hist = cv2.normalize(hist, hist).flatten()
-            
-            hist_diff = 1.0
-            if prev_hist is not None:
-                hist_diff = cv2.compareHist(prev_hist, hist, cv2.HISTCMP_CORREL)
-            
-            return (green_ratio < GREEN_RATIO_THRESHOLD or 
-                    hist_diff < HIST_DIFF_THRESHOLD), hist
-        
+
         # Open video
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             return {'success': False, 'error': f'Cannot open video: {video_path}'}
-        
-        # Video properties
+
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         duration = frame_count / fps if fps > 0 else 0
-        
-        print(f"🎥 Video: {width}x{height}, {fps:.1f} fps, {frame_count} frames ({duration:.1f}s)", file=sys.stderr)
-        
-        # Calculate adaptive sample rate
+
+        print(f"Video: {width}x{height} @ {fps:.1f}fps  {duration:.1f}s", file=sys.stderr)
+
+        # ROI — adaptive to video height, leaves small margin top/bottom
+        ROI_TOP = min(80, int(height * 0.07))
+        ROI_BOTTOM = max(height - 30, int(height * 0.93))
+
         sample_rate = get_sample_rate(frame_count, fps)
-        estimated_frames = frame_count // sample_rate
-        print(f"📊 Adaptive sampling: every {sample_rate} frames ({estimated_frames} total frames to process)", file=sys.stderr)
-        
-        # Convert click coordinates
+        print(f"Sample rate: every {sample_rate} frames", file=sys.stderr)
+
+        # Replay detection
+        GREEN_RATIO_THRESHOLD = 0.20
+        HIST_DIFF_THRESHOLD = 0.35
+
+        def is_replay(frame, prev_hist):
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            mask = cv2.inRange(hsv, (35, 40, 40), (85, 255, 255))
+            green_ratio = cv2.countNonZero(mask) / (frame.shape[0] * frame.shape[1])
+            hist = cv2.calcHist([frame], [0], None, [64], [0, 256])
+            hist = cv2.normalize(hist, hist).flatten()
+            hist_diff = 1.0
+            if prev_hist is not None:
+                hist_diff = cv2.compareHist(prev_hist, hist, cv2.HISTCMP_CORREL)
+            return (green_ratio < GREEN_RATIO_THRESHOLD or hist_diff < HIST_DIFF_THRESHOLD), hist
+
+        # Convert click to pixel coordinates
         click_x_px = (click_x / 100) * width
         click_y_px = (click_y / 100) * height
-        
-        print(f"🎯 Target click position: ({click_x_px:.0f}, {click_y_px:.0f}) pixels", file=sys.stderr)
-        
-        # Results storage
-        decision_points = []
-        player_tracks = []
+
+        # State
         target_player_id = None
+        player_tracks = []
+        frames_for_claude = []   # list of (timestamp, cropped_frame)
         prev_hist = None
         frame_idx = 0
         last_progress = 0
-        total_ball_detections = 0
-        total_player_frames = 0
-        
-        # Process video
-        print(f"🔄 Processing video...", file=sys.stderr)
-        
+        last_capture_time = -999.0
+        CAPTURE_INTERVAL = 1.0   # capture 1 frame per second of tracked time
+        MAX_FRAMES = 40          # cap to keep latency/cost bounded
+        debug_frame_b64 = None   # annotated full frame near click timestamp
+
+        search_window = max(6.0, duration * 0.30)
+
+        print(f"Processing frames...", file=sys.stderr)
+
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
-            
-            # Progress updates
-            progress = int((frame_idx / frame_count) * 100)
+
+            progress = int((frame_idx / max(frame_count, 1)) * 100)
             if progress >= last_progress + 10:
-                print(f"  Progress: {progress}%", file=sys.stderr)
+                print(f"  {progress}%", file=sys.stderr)
                 last_progress = progress
-            
-            # OPTIMIZATION: Skip frames using adaptive sampling
+
             if frame_idx % sample_rate != 0:
                 frame_idx += 1
                 continue
-            
-            # Skip replays
+
             replay_flag, prev_hist = is_replay(frame, prev_hist)
             if replay_flag:
                 frame_idx += 1
                 continue
-            
-            # ROI crop
+
             roi = frame[ROI_TOP:ROI_BOTTOM, :]
-            
-            # YOLO detection - use lower confidence for balls
-            results = model.predict(roi, verbose=False, conf=0.25)
-            
-            # Parse detections
+
+            results = model.predict(roi, verbose=False, conf=0.25, classes=[0])
+
             person_boxes, person_confs = [], []
-            ball_boxes, ball_confs = [], []
-            
             if len(results) > 0 and results[0].boxes is not None:
                 boxes = results[0].boxes
                 for i in range(len(boxes)):
                     box = boxes.xyxy[i].cpu().numpy()
-                    cls = int(boxes.cls[i].cpu().numpy())
                     conf = float(boxes.conf[i].cpu().numpy())
-                    
-                    if cls == 0:  # Person
-                        person_boxes.append(box)
-                        person_confs.append(conf)
-                    elif cls == 32:  # Sports ball - use lower confidence threshold
-                        if conf >= BALL_CONFIDENCE_THRESHOLD:
-                            ball_boxes.append(box)
-                            ball_confs.append(conf)
-            
-            # Convert to Supervision format
+                    person_boxes.append(box)
+                    person_confs.append(conf)
+
             person_detections = sv.Detections(
                 xyxy=np.array(person_boxes) if person_boxes else np.empty((0, 4)),
                 confidence=np.array(person_confs) if person_confs else np.empty(0),
                 class_id=np.zeros(len(person_boxes), dtype=int) if person_boxes else np.empty(0, dtype=int)
             )
-            
-            ball_detections = sv.Detections(
-                xyxy=np.array(ball_boxes) if ball_boxes else np.empty((0, 4)),
-                confidence=np.array(ball_confs) if ball_confs else np.empty(0),
-                class_id=np.ones(len(ball_boxes), dtype=int) * 32 if ball_boxes else np.empty(0, dtype=int)
-            )
-            
-            # ByteTrack tracking
+
             tracks = tracker.update_with_detections(person_detections)
-            
-            # Find target player
+
+            current_time = frame_idx / fps
+
+            # Lock onto target player within search window
             if target_player_id is None and len(tracks) > 0:
-                current_time = frame_idx / fps
-                if abs(current_time - click_timestamp) < 3.0:
+                if abs(current_time - click_timestamp) < search_window:
                     min_dist = float('inf')
+                    best_id = None
                     for i in range(len(tracks)):
                         bbox = tracks.xyxy[i]
-                        center_x = (bbox[0] + bbox[2]) / 2
-                        center_y = (bbox[1] + bbox[3]) / 2
-                        
+                        cx = (bbox[0] + bbox[2]) / 2
+                        cy = (bbox[1] + bbox[3]) / 2
                         dist = np.sqrt(
-                            (center_x - click_x_px)**2 + 
-                            (center_y - (click_y_px - ROI_TOP))**2
+                            (cx - click_x_px) ** 2 +
+                            (cy - max(0, click_y_px - ROI_TOP)) ** 2
                         )
-                        
                         if dist < min_dist:
                             min_dist = dist
-                            target_player_id = int(tracks.tracker_id[i])
-                    
-                    if target_player_id:
-                        print(f"🎯 Target player locked: ID {target_player_id}", file=sys.stderr)
-            
-            # Process tracks
-            target_player_pos = None
-            
+                            best_id = int(tracks.tracker_id[i])
+                    if best_id is not None:
+                        target_player_id = best_id
+                        print(f"Player locked: ID {target_player_id} (dist={min_dist:.0f}px @ {current_time:.1f}s)", file=sys.stderr)
+
+                        # Save annotated debug frame showing ALL detections + click point
+                        if debug_frame_b64 is None:
+                            debug = roi.copy()
+                            # Draw all detected players in blue
+                            for i in range(len(tracks)):
+                                bx1, by1, bx2, by2 = [int(v) for v in tracks.xyxy[i]]
+                                tid = int(tracks.tracker_id[i])
+                                color = (0, 255, 0) if tid == target_player_id else (255, 100, 0)
+                                cv2.rectangle(debug, (bx1, by1), (bx2, by2), color, 2)
+                                cv2.putText(debug, f"ID{tid}", (bx1, by1 - 4),
+                                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                            # Draw click position (adjusted for ROI)
+                            cx_click = int(click_x_px)
+                            cy_click = int(max(0, click_y_px - ROI_TOP))
+                            cv2.circle(debug, (cx_click, cy_click), 12, (0, 0, 255), 3)
+                            cv2.putText(debug, "CLICK", (cx_click + 14, cy_click),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                            # Resize to max 800px wide for reasonable payload size
+                            scale = min(1.0, 800 / debug.shape[1])
+                            if scale < 1.0:
+                                debug = cv2.resize(debug, (int(debug.shape[1]*scale), int(debug.shape[0]*scale)))
+                            _, buf = cv2.imencode('.jpg', debug, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                            debug_frame_b64 = base64.b64encode(buf.tobytes()).decode('utf-8')
+
+            # Track target player and capture frames for Claude
             if len(tracks) > 0:
                 for i in range(len(tracks)):
-                    track_id = int(tracks.tracker_id[i])
+                    if int(tracks.tracker_id[i]) != target_player_id:
+                        continue
+
                     bbox = tracks.xyxy[i]
-                    
-                    if track_id == target_player_id:
-                        center_x = (bbox[0] + bbox[2]) / 2
-                        center_y = (bbox[1] + bbox[3]) / 2
-                        target_player_pos = (center_x, center_y)
-                        total_player_frames += 1
-                        
-                        player_tracks.append({
-                            'frame': frame_idx,
-                            'timestamp': round(frame_idx / fps, 2),
-                            'position': {
-                                'x': round(float(center_x), 1),
-                                'y': round(float(center_y), 1)
+                    cx = (bbox[0] + bbox[2]) / 2
+                    cy = (bbox[1] + bbox[3]) / 2
+
+                    player_tracks.append({
+                        'frame': frame_idx,
+                        'timestamp': round(current_time, 2),
+                        'position': {'x': round(float(cx), 1), 'y': round(float(cy), 1)},
+                        'bbox': [float(x) for x in bbox]
+                    })
+
+                    # Capture frame for Claude (rate-limited, capped)
+                    if (current_time - last_capture_time >= CAPTURE_INTERVAL
+                            and len(frames_for_claude) < MAX_FRAMES):
+                        # Expand bbox by 1.5x for context, stay within ROI
+                        bx1, by1, bx2, by2 = bbox
+                        pad_x = (bx2 - bx1) * 0.5
+                        pad_y = (by2 - by1) * 0.5
+                        x1 = max(0, int(bx1 - pad_x))
+                        y1 = max(0, int(by1 - pad_y))
+                        x2 = min(roi.shape[1], int(bx2 + pad_x))
+                        y2 = min(roi.shape[0], int(by2 + pad_y))
+                        crop = roi[y1:y2, x1:x2]
+                        if crop.size > 0:
+                            frames_for_claude.append((round(current_time, 2), crop.copy()))
+                            last_capture_time = current_time
+
+            frame_idx += 1
+
+        cap.release()
+        try:
+            os.unlink(video_path)
+        except Exception:
+            pass
+
+        print(f"Tracking done — {len(player_tracks)} player frames, {len(frames_for_claude)} frames queued for Claude", file=sys.stderr)
+
+        if not frames_for_claude:
+            print("WARNING: Player never found. Check click position.", file=sys.stderr)
+            return {
+                'success': True,
+                'target_player_id': target_player_id,
+                'decision_points': [],
+                'player_tracks': player_tracks,
+                'debug_frame': debug_frame_b64,
+                'video_info': {'width': width, 'height': height, 'fps': round(fps, 2),
+                               'total_frames': frame_count, 'duration': round(duration, 2)},
+                'warning': 'Player not found — try clicking directly on the player at the moment they touch the ball'
+            }
+
+        # Claude Vision analysis
+        print(f"Sending {len(frames_for_claude)} frames to Claude Vision...", file=sys.stderr)
+        claude_client = anthropic.Anthropic()
+        decision_points = []
+
+        for ts, crop in frames_for_claude:
+            try:
+                _, buf = cv2.imencode('.jpg', crop, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                b64 = base64.b64encode(buf.tobytes()).decode('utf-8')
+
+                print(f"  Claude analyzing frame @ {ts:.1f}s...", file=sys.stderr)
+                response = claude_client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=300,
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}
                             },
-                            'bbox': [float(x) for x in bbox]
-                        })
-            
-            # Track ball detections for debugging
-            if len(ball_detections) > 0:
-                total_ball_detections += 1
-            
-            # Decision point detection
-            if target_player_pos is not None and len(ball_detections) > 0:
-                ball_bbox = ball_detections.xyxy[0]
-                ball_center = (
-                    (ball_bbox[0] + ball_bbox[2]) / 2,
-                    (ball_bbox[1] + ball_bbox[3]) / 2
+                            {"type": "text", "text": coaching_prompt}
+                        ]
+                    }]
                 )
-                
-                distance = np.sqrt(
-                    (target_player_pos[0] - ball_center[0])**2 + 
-                    (target_player_pos[1] - ball_center[1])**2
-                )
-                
-                if distance < BALL_PROXIMITY_THRESHOLD:
-                    timestamp = frame_idx / fps
-                    
-                    third = (ROI_BOTTOM - ROI_TOP) / 3
-                    y_pos = target_player_pos[1]
-                    if y_pos < third:
+
+                raw = response.content[0].text.strip()
+                # Strip markdown fences if present
+                if raw.startswith("```"):
+                    raw = raw.split("```")[1]
+                    if raw.startswith("json"):
+                        raw = raw[4:]
+                analysis = json.loads(raw)
+
+                if analysis.get('action', 'none') != 'none':
+                    # Determine field third from player position
+                    track_at_ts = next(
+                        (t for t in reversed(player_tracks) if t['timestamp'] <= ts),
+                        None
+                    )
+                    y_frac = (track_at_ts['position']['y'] / (ROI_BOTTOM - ROI_TOP)) if track_at_ts else 0.5
+                    if y_frac < 0.33:
                         field_third = "Attacking Third"
-                    elif y_pos < third * 2:
+                    elif y_frac < 0.66:
                         field_third = "Middle Third"
                     else:
                         field_third = "Defensive Third"
-                    
+
                     decision_points.append({
-                        'timestamp': round(timestamp, 2),
-                        'frame': frame_idx,
-                        'player_position': {
-                            'x': round((target_player_pos[0] / width) * 100, 1),
-                            'y': round(((target_player_pos[1] + ROI_TOP) / height) * 100, 1)
-                        },
+                        'timestamp': ts,
+                        'type': analysis.get('action', 'action'),
+                        'description': analysis.get('description', ''),
+                        'recommendation': analysis.get('coaching', ''),
+                        'rating': int(analysis.get('rating', 3)),
                         'field_third': field_third,
-                        'ball_distance': round(float(distance), 1),
-                        'clip_start': max(0, timestamp - 5),
-                        'clip_end': min(duration, timestamp + 10)
+                        'clip_start': max(0, ts - 5),
+                        'clip_end': min(duration, ts + 10),
+                        'player_position': track_at_ts['position'] if track_at_ts else {'x': 50, 'y': 50}
                     })
-                    
-                    print(f"⚽ Decision point at {timestamp:.1f}s", file=sys.stderr)
-            
-            frame_idx += 1
-        
-        cap.release()
-        
-        try:
-            os.unlink(video_path)
-        except:
-            pass
-        
-        print(f"✅ Tracking complete!", file=sys.stderr)
-        print(f"   Target player: ID {target_player_id}", file=sys.stderr)
-        print(f"   Player tracked in {total_player_frames} frames", file=sys.stderr)
-        print(f"   Ball detected in {total_ball_detections} frames", file=sys.stderr)
-        print(f"   Decision points: {len(decision_points)}", file=sys.stderr)
-        
-        # If no decision points but player was tracked, add fallback points based on player movement
-        if len(decision_points) == 0 and len(player_tracks) > 10:
-            print(f"⚠️  No ball-based decision points found. Adding movement-based points...", file=sys.stderr)
-            # Add decision points based on significant player movements
-            third = (ROI_BOTTOM - ROI_TOP) / 3
-            for i in range(10, len(player_tracks), max(1, len(player_tracks) // 5)):
-                track = player_tracks[i]
-                y_pos = track['position']['y']
-                
-                # Determine field third based on player position in ROI
-                if y_pos < third:
-                    field_third = "Attacking Third"
-                elif y_pos < third * 2:
-                    field_third = "Middle Third"
+                    print(f"  Decision point: {analysis.get('action')} @ {ts:.1f}s (rating {analysis.get('rating')})", file=sys.stderr)
                 else:
-                    field_third = "Defensive Third"
-                
-                decision_points.append({
-                    'timestamp': track['timestamp'],
-                    'frame': track['frame'],
-                    'player_position': {
-                        'x': round((track['position']['x'] / width) * 100, 1),
-                        'y': round(((track['position']['y'] + ROI_TOP) / height) * 100, 1)
-                    },
-                    'field_third': field_third,
-                    'ball_distance': None,
-                    'clip_start': max(0, track['timestamp'] - 5),
-                    'clip_end': min(duration, track['timestamp'] + 10),
-                    'type': 'movement'  # Indicate this is movement-based, not ball-based
-                })
-            print(f"   Added {len(decision_points)} movement-based decision points", file=sys.stderr)
-        
+                    print(f"  No action @ {ts:.1f}s", file=sys.stderr)
+
+            except Exception as e:
+                print(f"  Claude error @ {ts:.1f}s: {e}", file=sys.stderr)
+                continue
+
+        print(f"Analysis complete: {len(decision_points)} decision points found", file=sys.stderr)
+
+        # Build list of crop thumbnails (what Claude saw) for debugging
+        crop_thumbnails = []
+        for ts, crop in frames_for_claude[:8]:  # first 8 only to keep payload small
+            scale = min(1.0, 300 / max(crop.shape[1], 1))
+            thumb = cv2.resize(crop, (int(crop.shape[1]*scale), int(crop.shape[0]*scale))) if scale < 1.0 else crop
+            _, buf = cv2.imencode('.jpg', thumb, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            crop_thumbnails.append({
+                'timestamp': ts,
+                'image': base64.b64encode(buf.tobytes()).decode('utf-8')
+            })
+
         return {
             'success': True,
             'target_player_id': target_player_id,
             'decision_points': decision_points,
             'player_tracks': player_tracks,
+            'debug_frame': debug_frame_b64,
+            'crop_thumbnails': crop_thumbnails,
             'video_info': {
                 'width': width,
                 'height': height,
@@ -402,78 +426,54 @@ def track_player(
                 'duration': round(duration, 2)
             }
         }
-        
+
     except Exception as e:
         import traceback
-        error_msg = str(e)
-        stack_trace = traceback.format_exc()
-        print(f"❌ Error: {error_msg}", file=sys.stderr)
-        print(stack_trace, file=sys.stderr)
-        
-        return {
-            'success': False,
-            'error': error_msg,
-            'stack_trace': stack_trace
-        }
+        print(f"Error: {e}", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
+        return {'success': False, 'error': str(e), 'stack_trace': traceback.format_exc()}
 
-# Webhook endpoint - Updated to fastapi_endpoint
+
 @app.function(
     image=gpu_image,
-    min_containers=0  # Updated from keep_warm=0
+    min_containers=0
 )
 @modal.asgi_app()
 def track_webhook():
-    """FastAPI endpoint for PitchMind backend"""
     from fastapi import FastAPI, Request
     from fastapi.responses import JSONResponse
-    
+
     web_app = FastAPI()
-    
+
     @web_app.post("/track")
     async def track_endpoint(request: Request):
-        """
-        POST body:
-        {
-            "video_url": "https://...",
-            "click_x": 50.0,
-            "click_y": 50.0,
-            "click_timestamp": 10.5
-        }
-        """
         try:
             data = await request.json()
-            
+
             video_url = data.get('video_url')
-            click_x = float(data.get('click_x', 50.0))
-            click_y = float(data.get('click_y', 50.0))
-            click_timestamp = float(data.get('click_timestamp', 0.0))
-            
             if not video_url:
-                return JSONResponse(
-                    {'success': False, 'error': 'Missing video_url'},
-                    status_code=400
-                )
-            
-            # Call the tracker
-            result = track_player.remote(video_url, click_x, click_y, click_timestamp)
-            
-            return JSONResponse(result)
-            
-        except Exception as e:
-            return JSONResponse(
-                {'success': False, 'error': str(e)},
-                status_code=500
+                return JSONResponse({'success': False, 'error': 'Missing video_url'}, status_code=400)
+
+            result = track_player.remote(
+                video_url,
+                float(data.get('click_x', 50.0)),
+                float(data.get('click_y', 50.0)),
+                float(data.get('click_timestamp', 0.0)),
+                player_name=data.get('player_name'),
+                jersey_number=int(data['jersey_number']) if data.get('jersey_number') else None,
+                jersey_color=data.get('jersey_color'),
             )
-    
+
+            return JSONResponse(result)
+
+        except Exception as e:
+            return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
+
     return web_app
 
 
-# Local testing
 @app.local_entrypoint()
 def test(video_path: str = "test.mp4", click_x: float = 50.0, click_y: float = 50.0):
-    """Test: modal run modal_production_tracker.py --video-path test.mp4"""
-    print("🧪 Testing tracker locally...")
+    print("Testing tracker...")
     result = track_player.remote(video_path, click_x, click_y)
-    print("\n" + "="*60)
     print(json.dumps(result, indent=2))
-    print("="*60)

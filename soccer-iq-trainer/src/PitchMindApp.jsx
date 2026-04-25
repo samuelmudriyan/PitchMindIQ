@@ -1752,7 +1752,38 @@ export default function PitchMindApp() {
                   <div className="p-4 space-y-4 overflow-y-auto flex-1">
                     {analysisResults.decision_points?.length > 0 ? analysisResults.decision_points.map((point, index) => (
                       <DecisionPointCard key={index} point={point} index={index} onPlayClip={(seconds, idx) => { if (isPlayingClip && activeClipIndex === idx) { stopClip(); } else { playClip(seconds, idx); } }} isPlaying={isPlayingClip} isActive={activeClipIndex === index} />
-                    )) : <div className="text-center py-8 text-gray-400">No decision points found.</div>}
+                    )) : (
+                      <div className="space-y-4">
+                        <div className="text-center py-4 text-gray-400">No decision points found.</div>
+                        {analysisResults.warning && <p className="text-xs text-amber-400 text-center">{analysisResults.warning}</p>}
+                        {(analysisResults.debug_frame || analysisResults.crop_thumbnails?.length > 0) && (
+                          <details className="bg-black/30 border border-white/10 rounded-xl p-3">
+                            <summary className="text-xs text-gray-400 cursor-pointer hover:text-white">Debug: what the tracker saw</summary>
+                            <div className="mt-3 space-y-3">
+                              {analysisResults.debug_frame && (
+                                <div>
+                                  <p className="text-xs text-gray-500 mb-1">Player detection at click moment (green=target, red=click point)</p>
+                                  <img src={`data:image/jpeg;base64,${analysisResults.debug_frame}`} alt="debug" className="w-full rounded-lg" />
+                                </div>
+                              )}
+                              {analysisResults.crop_thumbnails?.length > 0 && (
+                                <div>
+                                  <p className="text-xs text-gray-500 mb-2">Frames sent to Claude Vision ({analysisResults.crop_thumbnails.length})</p>
+                                  <div className="grid grid-cols-4 gap-1">
+                                    {analysisResults.crop_thumbnails.map((t, i) => (
+                                      <div key={i} className="relative">
+                                        <img src={`data:image/jpeg;base64,${t.image}`} alt={`t=${t.timestamp}s`} className="w-full rounded" />
+                                        <span className="absolute bottom-0 left-0 bg-black/70 text-white text-xs px-1">{t.timestamp}s</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
