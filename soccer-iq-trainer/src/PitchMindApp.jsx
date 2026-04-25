@@ -25,6 +25,8 @@ const saveToStorage = (key, userId, data) => {
   localStorage.setItem(`pitchmind_${key}_${userId}`, JSON.stringify(data));
 };
 
+const STORAGE_KEYS = { PLAYERS: 'players', TEAMS: 'teams', VIDEOS: 'videos', SESSIONS: 'sessions', REPORTS: 'reports', CHAT_HISTORY: 'chat_history' };
+
 // Jersey color options
 const JERSEY_COLORS = [
   { name: 'Red', value: '#ef4444', light: '#fecaca' },
@@ -615,6 +617,8 @@ export default function PitchMindApp() {
   const [teams, setTeams] = useState([]);
   const [savedFormations, setSavedFormations] = useState([]);
   const [dataSynced, setDataSynced] = useState(false);
+  const [userProfile, setUserProfile] = useState(null);
+  const [dataLoading, setDataLoading] = useState(false);
   const [teamsnapToken, setTeamsnapToken] = useState(() => localStorage.getItem('teamsnap_token'));
   const [teamsnapTeams, setTeamsnapTeams] = useState([]);
   const [teamsnapLoading, setTeamsnapLoading] = useState(false);
@@ -672,21 +676,21 @@ export default function PitchMindApp() {
     } catch (err) {
       console.error('Sync error, falling back to localStorage:', err);
       // Fallback to localStorage if DB fails
-      setPlayers(loadFromStorage(STORAGE_KEYS.PLAYERS, []));
-      setTeams(loadFromStorage(STORAGE_KEYS.TEAMS, []));
-      setSessions(loadFromStorage(STORAGE_KEYS.SESSIONS, []));
-      setChatHistory(loadFromStorage(STORAGE_KEYS.CHAT_HISTORY, []));
+      setPlayers(loadFromStorage(STORAGE_KEYS.PLAYERS, user?.id, []));
+      setTeams(loadFromStorage(STORAGE_KEYS.TEAMS, user?.id, []));
+      setSessions(loadFromStorage(STORAGE_KEYS.SESSIONS, user?.id, []));
+      setChatHistory(loadFromStorage(STORAGE_KEYS.CHAT_HISTORY, user?.id, []));
     }
     setDataLoading(false);
   };
 
   // Save to localStorage as backup
-  useEffect(() => { saveToStorage(STORAGE_KEYS.PLAYERS, players); }, [players]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.TEAMS, teams); }, [teams]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.VIDEOS, videos); }, [videos]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.SESSIONS, sessions); }, [sessions]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.REPORTS, reports); }, [reports]);
-  useEffect(() => { saveToStorage(STORAGE_KEYS.CHAT_HISTORY, chatHistory); }, [chatHistory]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.PLAYERS, user?.id, players); }, [players]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.TEAMS, user?.id, teams); }, [teams]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.VIDEOS, user?.id, videos); }, [videos]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.SESSIONS, user?.id, sessions); }, [sessions]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.REPORTS, user?.id, reports); }, [reports]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.CHAT_HISTORY, user?.id, chatHistory); }, [chatHistory]);
 
   // TeamSnap OAuth callback handler
   useEffect(() => {
