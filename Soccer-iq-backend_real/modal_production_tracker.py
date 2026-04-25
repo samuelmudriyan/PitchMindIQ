@@ -185,9 +185,11 @@ def track_player(
         MAX_FRAMES = 40          # cap to keep latency/cost bounded
         debug_frame_b64 = None   # annotated full frame near click timestamp
 
-        search_window = max(6.0, duration * 0.30)
+        # Only try to lock on within 2 seconds AFTER click_timestamp
+        # (all frames before click_timestamp still feed ByteTrack to build stable IDs)
+        LOCK_ON_WINDOW = 2.0
 
-        print(f"Processing frames...", file=sys.stderr)
+        print(f"Processing frames... lock-on target: {click_timestamp:.1f}s ± {LOCK_ON_WINDOW}s", file=sys.stderr)
 
         while cap.isOpened():
             ret, frame = cap.read()
@@ -231,9 +233,10 @@ def track_player(
 
             current_time = frame_idx / fps
 
-            # Lock onto target player within search window
+            # Lock onto target player: only try at frames AT or just after click_timestamp
+            # This ensures click coordinates match the actual video frame being analyzed
             if target_player_id is None and len(tracks) > 0:
-                if abs(current_time - click_timestamp) < search_window:
+                if current_time >= click_timestamp and current_time <= click_timestamp + LOCK_ON_WINDOW:
                     min_dist = float('inf')
                     best_id = None
                     for i in range(len(tracks)):
