@@ -4,6 +4,8 @@
   "private": true,
   "dependencies": {
     "@clerk/clerk-react": "^5.57.1",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "@tailwindcss/postcss": "^4.1.17",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",

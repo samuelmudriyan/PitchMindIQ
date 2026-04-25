@@ -1,12 +1,15 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { useUser, UserButton } from '@clerk/clerk-react';
-import { Upload, CheckCircle, AlertCircle, Loader2, Clock, Brain, Video, Zap, MousePointer, Target, Sparkles, Award, RotateCcw, Share2, Download, Save, Plus, X, ChevronRight, ChevronLeft, Home, Users, FileVideo, Lightbulb, Clipboard, FileText, BookOpen, BarChart3, TrendingUp, Bell, Settings, Search, Calendar, Edit, Trash2, Eye, PlayCircle, Send, Timer, ArrowUp, ArrowDown, ArrowRight, Play, Pause, StopCircle, User, Hash, Palette, Tag, Check, Link2, RefreshCw, Database } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, Loader2, Clock, Brain, Video, Zap, MousePointer, Target, Sparkles, Award, RotateCcw, Share2, Download, Save, Plus, X, ChevronRight, ChevronLeft, Home, Users, FileVideo, Lightbulb, Clipboard, FileText, BookOpen, BarChart3, TrendingUp, Bell, Settings, Search, Calendar, Edit, Trash2, Eye, PlayCircle, Send, Timer, ArrowUp, ArrowDown, ArrowRight, Play, Pause, StopCircle, User, Hash, Palette, Tag, Check, Link2, RefreshCw, Database, Film, Scissors, SkipBack, SkipForward } from 'lucide-react';
 import logo from './assets/logo.png';
 import DrillDetailPage from './DrillDetailPage';
 import DrillsPage from './DrillsPage';
 import { drillsData } from './DrillData';
 import FormationCreator from './Formationcreator';
 import ManualTaggingPage from './ManualTaggingPage';
+import GameClipsPage from './GameClipsPage';
 
 const API_BASE = 'https://pitchmind-backend-production-483d.up.railway.app';
 
@@ -474,6 +477,7 @@ const Sidebar = ({ currentPage, setCurrentPage, sidebarCollapsed, setSidebarColl
         <SidebarItem icon={FileText} label="Auto Reports" active={currentPage === 'reports'} onClick={() => setCurrentPage('reports')} />
         <SidebarItem icon={BookOpen} label="Drill Library" active={currentPage === 'drills' || currentPage === 'drillDetail'} onClick={() => setCurrentPage('drills')} />
         <SidebarItem icon={Tag} label="Manual Tagging" active={currentPage === 'manualTagging'} onClick={() => setCurrentPage('manualTagging')} badge="New"/>
+        <SidebarItem icon={Film} label="Game Clips" active={currentPage === 'gameClips'} onClick={() => setCurrentPage('gameClips')} badge="New"/>
         {!sidebarCollapsed && <div className="pt-4 pb-2"><div className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-3">Analytics</div></div>}
         <SidebarItem icon={Target} label="Formations" active={currentPage === 'formations'} onClick={() => setCurrentPage('formations')}/>
         <SidebarItem icon={BarChart3} label="Team Stats" active={currentPage === 'stats'} onClick={() => setCurrentPage('stats')} />
@@ -633,6 +637,10 @@ export default function PitchMindApp() {
   
   const videoRef = useRef(null);
   const fileInputRef = useRef(null);
+  const ffmpegRef = useRef(null);
+  const ffmpegLoaded = useRef(false);
+  const [trimStatus, setTrimStatus] = useState('');
+  const [gameClips, setGameClips] = useState(() => loadFromStorage('gameClips', user?.id, []));
 
   // Sync data from database on mount
   useEffect(() => {
@@ -1548,6 +1556,37 @@ export default function PitchMindApp() {
     stopClip();
   };
   
+  const loadFfmpeg = async () => {
+    if (ffmpegLoaded.current) return ffmpegRef.current;
+    const ffmpeg = new FFmpeg();
+    ffmpegRef.current = ffmpeg;
+    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+    await ffmpeg.load({
+      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+    });
+    ffmpegLoaded.current = true;
+    return ffmpeg;
+  };
+
+  const trimVideoForUpload = async (file, clickTimestamp, durationSeconds = 60) => {
+    const startSec = Math.max(0, clickTimestamp - 15);
+    setTrimStatus(`Trimming clip (${Math.round(startSec)}s – ${Math.round(startSec + durationSeconds)}s)…`);
+    const ffmpeg = await loadFfmpeg();
+    ffmpeg.on('progress', ({ progress }) => {
+      setTrimStatus(`Trimming… ${Math.round(progress * 100)}%`);
+    });
+    const inputName = 'input' + file.name.slice(file.name.lastIndexOf('.'));
+    const outputName = 'trimmed.mp4';
+    await ffmpeg.writeFile(inputName, await fetchFile(file));
+    await ffmpeg.exec(['-ss', String(startSec), '-t', String(durationSeconds), '-i', inputName, '-c', 'copy', '-avoid_negative_ts', 'make_zero', outputName]);
+    const data = await ffmpeg.readFile(outputName);
+    await ffmpeg.deleteFile(inputName);
+    await ffmpeg.deleteFile(outputName);
+    setTrimStatus('');
+    return new File([data.buffer], 'trimmed.mp4', { type: 'video/mp4' });
+  };
+
   const startAnalysis = async () => {
     if (videoRef.current) videoRef.current.pause();
     if (!videoFile || !clickPosition) return;
@@ -1555,8 +1594,14 @@ export default function PitchMindApp() {
     setUploadProgress(0);
     setError(null);
     try {
+      let fileToUpload = videoFile;
+      if (videoFile.size > 50 * 1024 * 1024) {
+        setUploadState('trimming');
+        fileToUpload = await trimVideoForUpload(videoFile, clickPosition.timestamp || 0);
+        setUploadState('uploading');
+      }
       const formData = new FormData();
-      formData.append('video', videoFile);
+      formData.append('video', fileToUpload);
       formData.append('clickX', clickPosition.x.toFixed(2));
       formData.append('clickY', clickPosition.y.toFixed(2));
       formData.append('clickTimestamp', clickPosition.timestamp || 0);
@@ -1660,12 +1705,16 @@ export default function PitchMindApp() {
             </div>
           )}
 
-          {['uploading', 'analyzing'].includes(uploadState) && (
+          {['trimming', 'uploading', 'analyzing'].includes(uploadState) && (
             <div className="bg-white/5 border border-white/10 rounded-3xl p-12 text-center">
               <div className="inline-flex p-6 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 mb-6"><Loader2 className="w-12 h-12 text-emerald-400 animate-spin" /></div>
-              <h2 className="text-2xl font-bold text-white mb-2">{uploadState === 'uploading' ? 'Uploading...' : 'AI Analyzing...'}</h2>
+              <h2 className="text-2xl font-bold text-white mb-2">
+                {uploadState === 'trimming' ? 'Trimming Clip...' : uploadState === 'uploading' ? 'Uploading...' : 'AI Analyzing...'}
+              </h2>
               {trackedPlayer && <p className="text-emerald-400 mb-2">Tracking: {trackedPlayer.name} (#{trackedPlayer.jerseyNumber || '?'})</p>}
-              <p className="text-gray-400 mb-8">{uploadState === 'uploading' ? 'Sending to GPU servers' : 'Identifying decision moments'}</p>
+              <p className="text-gray-400 mb-8">
+                {uploadState === 'trimming' ? (trimStatus || 'Extracting 60s clip with ffmpeg…') : uploadState === 'uploading' ? 'Sending to GPU servers' : 'Identifying decision moments'}
+              </p>
               <div className="max-w-md mx-auto"><div className="h-2 bg-white/10 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full" style={{ width: `${uploadState === 'analyzing' ? 100 : uploadProgress}%` }} /></div></div>
             </div>
           )}
@@ -1768,6 +1817,7 @@ export default function PitchMindApp() {
       case 'formations': return <FormationCreator sidebarCollapsed={sidebarCollapsed} setCurrentPage={setCurrentPage} players={players} savedFormations={savedFormations} setSavedFormations={setSavedFormations}/>;
       case 'upload': return <UploadPage />;
       case 'manualTagging': return <ManualTaggingPage user={user} sidebarCollapsed={sidebarCollapsed} setCurrentPage={setCurrentPage} taggedGames={taggedGames} setTaggedGames={setTaggedGames} />;
+      case 'gameClips': return <GameClipsPage user={user} sidebarCollapsed={sidebarCollapsed} setCurrentPage={setCurrentPage} gameClips={gameClips} setGameClips={setGameClips} trimVideoForUpload={trimVideoForUpload} apiBase={API_BASE} players={players} />;
       default: return <Dashboard />;
     }
   };
