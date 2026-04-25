@@ -181,27 +181,87 @@ def track_player(
         click_x_px = (click_x / 100) * width
         click_y_px = (click_y / 100) * height
 
-        def sample_jersey_color(bbox, roi):
-            """Sample the dominant hue/saturation from the jersey area of a bounding box."""
+        def hue_dist(h1, h2):
+            if h1 is None or h2 is None:
+                return 90.0
+            d = abs(h1 - h2)
+            return min(d, 180.0 - d)
+
+        def region_color(crop, y0, y1, x0=0.1, x1=0.9):
+            """Return (hue, sat, val) mean for a vertical slice of a crop. Returns None on failure."""
+            h, w = crop.shape[:2]
+            if h < 8 or w < 6:
+                return None
+            r = crop[int(h * y0):int(h * y1), int(w * x0):int(w * x1)]
+            if r.size == 0:
+                return None
+            hsv = cv2.cvtColor(r, cv2.COLOR_BGR2HSV)
+            return (float(np.mean(hsv[:, :, 0])),
+                    float(np.mean(hsv[:, :, 1])),
+                    float(np.mean(hsv[:, :, 2])))
+
+        def sample_appearance(bbox, roi):
+            """Extract multi-feature appearance descriptor for re-identification.
+            Returns dict with jersey/shorts/boots colors, aspect ratio, and center position."""
             bx1, by1, bx2, by2 = [int(v) for v in bbox]
             crop = roi[by1:by2, bx1:bx2]
             if crop.size == 0:
-                return None, None
+                return None
             h, w = crop.shape[:2]
-            jersey = crop[int(h * 0.15):int(h * 0.65), int(w * 0.1):int(w * 0.9)]
-            if jersey.size == 0:
-                return None, None
-            hsv = cv2.cvtColor(jersey, cv2.COLOR_BGR2HSV)
-            return float(np.mean(hsv[:, :, 0])), float(np.mean(hsv[:, :, 1]))
+            if h < 20 or w < 8:
+                return None
+            return {
+                'jersey': region_color(crop, 0.10, 0.50),   # torso / shirt
+                'shorts': region_color(crop, 0.50, 0.72),   # shorts
+                'boots':  region_color(crop, 0.80, 1.00),   # boots / socks
+                'aspect': h / max(w, 1),                    # body proportions (build)
+                'cx': (bx1 + bx2) / 2,
+                'cy': (by1 + by2) / 2,
+            }
 
-        def hue_dist(h1, h2):
-            d = abs(h1 - h2)
-            return min(d, 180 - d)
+        def appearance_score(target, candidate, time_since_seen):
+            """Lower = better match. Returns inf if hard mismatch on jersey color."""
+            if target is None or candidate is None:
+                return float('inf')
+
+            # --- Jersey: hard gate + weighted score ---
+            jt, jc = target.get('jersey'), candidate.get('jersey')
+            jersey_hd = hue_dist(jt[0] if jt else None, jc[0] if jc else None)
+            if jersey_hd > 35:           # wrong team entirely
+                return float('inf')
+            score = jersey_hd * 2.5     # most important feature
+
+            # jersey saturation (white vs coloured)
+            if jt and jc:
+                score += abs(jt[1] - jc[1]) * 0.04
+
+            # --- Shorts color ---
+            st, sc_cand = target.get('shorts'), candidate.get('shorts')
+            if st and sc_cand:
+                score += hue_dist(st[0], sc_cand[0]) * 1.2
+                score += abs(st[1] - sc_cand[1]) * 0.03
+
+            # --- Boot / sock color ---
+            bt, bc = target.get('boots'), candidate.get('boots')
+            if bt and bc:
+                score += hue_dist(bt[0], bc[0]) * 0.6
+                score += abs(bt[2] - bc[2]) * 0.02   # brightness of boots
+
+            # --- Player build (aspect ratio) ---
+            score += abs(target['aspect'] - candidate['aspect']) * 8.0
+
+            # --- Positional continuity (only useful for brief occlusions, not camera cuts) ---
+            if time_since_seen < 2.5:
+                dx = target['cx'] - candidate['cx']
+                dy = target['cy'] - candidate['cy']
+                pos_dist = (dx * dx + dy * dy) ** 0.5
+                score += pos_dist * 0.05   # soft preference for nearby position
+
+            return score
 
         # State
         target_player_id = None
-        target_hue_mean = None
-        target_sat_mean = None
+        target_appearance = None    # multi-feature appearance descriptor for re-ID
         last_seen_time = -999.0
         last_reacquire_time = -999.0
         player_tracks = []
@@ -284,9 +344,9 @@ def track_player(
                     if best_id is not None:
                         target_player_id = best_id
                         last_seen_time = current_time
-                        # Sample jersey color for camera-cut re-identification
-                        target_hue_mean, target_sat_mean = sample_jersey_color(best_bbox, roi)
-                        print(f"Player locked: ID {target_player_id} (dist={min_dist:.0f}px @ {current_time:.1f}s, hue={target_hue_mean:.0f})", file=sys.stderr)
+                        target_appearance = sample_appearance(best_bbox, roi)
+                        jersey_hue = target_appearance['jersey'][0] if target_appearance and target_appearance.get('jersey') else '?'
+                        print(f"Player locked: ID {target_player_id} dist={min_dist:.0f}px @ {current_time:.1f}s jersey_hue={jersey_hue:.0f}", file=sys.stderr)
 
                         # Save annotated debug frame showing ALL detections + click point
                         if debug_frame_b64 is None:
@@ -348,32 +408,36 @@ def track_player(
                             frames_for_claude.append((round(current_time, 2), crop.copy()))
                             last_capture_time = current_time
 
-            # Jersey-color re-identification after camera cuts
-            # ByteTrack loses the target ID on every camera cut; re-acquire by matching jersey color
+            # Multi-feature re-identification after camera cuts
+            # Uses jersey, shorts, boots colors + player build + positional continuity
             if (target_player_id is not None
                     and not target_found_this_frame
-                    and target_hue_mean is not None
+                    and target_appearance is not None
                     and (current_time - last_seen_time) >= 0.5
                     and (current_time - last_reacquire_time) >= 1.0
                     and len(tracks) > 0):
                 best_match_id = None
                 best_score = float('inf')
+                time_gap = current_time - last_seen_time
                 for i in range(len(tracks)):
-                    h, s = sample_jersey_color(tracks.xyxy[i], roi)
-                    if h is None:
-                        continue
-                    hd = hue_dist(h, target_hue_mean)
-                    sd = abs(s - (target_sat_mean or 0))
-                    if hd < 30:
-                        score = hd + sd * 0.3
-                        if score < best_score:
-                            best_score = score
-                            best_match_id = int(tracks.tracker_id[i])
-                if best_match_id is not None:
+                    candidate = sample_appearance(tracks.xyxy[i], roi)
+                    score = appearance_score(target_appearance, candidate, time_gap)
+                    if score < best_score:
+                        best_score = score
+                        best_match_id = int(tracks.tracker_id[i])
+                # Accept match if score is reasonable (lower = better)
+                if best_match_id is not None and best_score < 80:
                     target_player_id = best_match_id
                     last_seen_time = current_time
                     last_reacquire_time = current_time
-                    print(f"Re-identified by jersey color: ID {target_player_id} @ {current_time:.1f}s", file=sys.stderr)
+                    # Update appearance descriptor with fresh sample
+                    for i in range(len(tracks)):
+                        if int(tracks.tracker_id[i]) == best_match_id:
+                            fresh = sample_appearance(tracks.xyxy[i], roi)
+                            if fresh:
+                                target_appearance = fresh
+                            break
+                    print(f"Re-identified (score={best_score:.1f}): ID {target_player_id} @ {current_time:.1f}s gap={time_gap:.1f}s", file=sys.stderr)
 
             frame_idx += 1
 
