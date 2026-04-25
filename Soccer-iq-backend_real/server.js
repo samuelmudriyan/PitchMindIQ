@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
-const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
@@ -13,13 +12,13 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Job tracking for progress updates
-const analysisJobs = new Map();
-
 // Environment variables
-const MODAL_WEBHOOK_URL = process.env.MODAL_WEBHOOK_URL || 'https://pitchmind--pitchmind-gpu-tracker-v7-fastapi-app.modal.run';
+// MODAL_ENDPOINT should point to the /track route of pitchmind_tracker_final
+// e.g. https://sammywassman--pitchmind-tracker-final-track-webhook.modal.run/track
+const MODAL_ENDPOINT = process.env.MODAL_ENDPOINT || 'https://sammywassman--pitchmind-tracker-final-track-webhook.modal.run/track';
+const BACKEND_URL = process.env.BACKEND_URL || 'https://pitchmind-backend-production-483d.up.railway.app';
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const DATABASE_URL = process.env.DATABASE_URL;
-const BACKEND_URL = process.env.BACKEND_URL || 'https://pitchmind-backend-production-483d.up.railway.app';
 
 // TeamSnap Config
 const TEAMSNAP_CLIENT_ID = process.env.TEAMSNAP_CLIENT_ID;
@@ -279,13 +278,12 @@ app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// ============================================
-// SERVE UPLOADS DIRECTORY (CRITICAL FOR MODAL)
-// ============================================
+// Serve uploaded videos so Modal can download them by URL
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
+app.use('/uploads', express.static(uploadsDir));
 
 // Make uploads publicly accessible
 app.use('/uploads', express.static(uploadsDir));
@@ -366,7 +364,7 @@ app.get('/', (req, res) => {
     version: '4.2 - Manual Tagging + Long Video Support',
     features: ['video-analysis', 'custom-tracker', 'manual-tagging', 'ai-coach', 'teamsnap-integration', 'database', 'stripe-payments'],
     database: DATABASE_URL ? 'connected' : 'not configured',
-    modal: MODAL_WEBHOOK_URL ? 'configured' : 'not configured',
+    modal: MODAL_ENDPOINT ? 'configured' : 'not configured',
     teamsnap: TEAMSNAP_CLIENT_ID ? 'configured' : 'not configured',
     stripe: process.env.STRIPE_SECRET_KEY ? 'configured' : 'not configured'
   });
@@ -1188,166 +1186,72 @@ app.get('/api/sync', authMiddleware, async (req, res) => {
 // VIDEO ANALYSIS ENDPOINT - LONG VIDEO SUPPORT
 // ============================================
 app.post('/api/analyze', upload.single('video'), async (req, res) => {
-  console.log('========================================');
-  console.log('📹 VIDEO ANALYSIS - LONG VIDEO SUPPORT');
-  console.log('========================================');
-  
+  console.log('Analysis request received');
+
+
   if (!req.file) {
     return res.status(400).json({ error: 'No video file uploaded' });
   }
 
-  const { clickX, clickY, clickTimestamp } = req.body;
-  console.log(`Video: ${req.file.filename}`);
-  console.log(`Click: (${clickX}%, ${clickY}%) at ${clickTimestamp}s`);
+  const { clickX, clickY, clickTimestamp, playerName, jerseyNumber, jerseyColor } = req.body;
+  const clickXNum = parseFloat(clickX) || 0;
+  const clickYNum = parseFloat(clickY) || 0;
+  const clickTs   = parseFloat(clickTimestamp) || 0;
 
-  // Generate job ID for tracking progress
-  const jobId = Date.now().toString();
-  
-  // Initialize job status
-  analysisJobs.set(jobId, {
-    status: 'processing',
-    progress: 0,
-    message: 'Starting analysis...',
-    startTime: Date.now()
-  });
+  console.log(`Processing: ${req.file.filename}`);
+  console.log(`Click: (${clickXNum.toFixed(1)}%, ${clickYNum.toFixed(1)}%) at ${clickTs}s`);
+  if (playerName) console.log(`Tracking: ${playerName} #${jerseyNumber || '?'} color=${jerseyColor || 'unknown'}`);
 
-  // Return job ID immediately
-  res.json({ 
-    jobId, 
-    status: 'processing',
-    message: 'Video analysis started. Short clips: 2-5 min. Long videos (20+ min): 15-30 min.'
-  });
+  const videoUrl = `${BACKEND_URL}/uploads/${req.file.filename}`;
+  console.log(`Video URL for Modal: ${videoUrl}`);
 
-  // Process video in background
-  (async () => {
-    try {
-      // Generate publicly accessible video URL
-      const encodedFilename = encodeURIComponent(req.file.filename);
-      const videoUrl = `${BACKEND_URL}/uploads/${encodedFilename}`;
-      console.log(`📹 Video URL: ${videoUrl}`);
-      
-      // Update progress
-      analysisJobs.set(jobId, {
-        status: 'processing',
-        progress: 5,
-        message: 'Sending video to GPU tracker...',
-        startTime: analysisJobs.get(jobId).startTime
-      });
-      
-      console.log(`🚀 Calling Modal tracker: ${MODAL_WEBHOOK_URL}`);
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 7200000); // 2 hours
-      
-      let modalResponse;
-      try {
-        modalResponse = await fetch(MODAL_WEBHOOK_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            video_url: videoUrl,
-            click_x: parseFloat(clickX) || 50.0,
-            click_y: parseFloat(clickY) || 50.0,
-            click_timestamp: parseFloat(clickTimestamp) || 0.0
-          }),
-          signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-        
-        if (!modalResponse.ok) {
-          const errorText = await modalResponse.text();
-          throw new Error(`Modal tracker error: ${errorText}`);
-        }
-        
-        const results = await modalResponse.json();
-        
-        // Check if Modal returned an error
-        if (!results.success) {
-          throw new Error(results.error || 'Modal tracking failed - no player found');
-        }
-        
-        console.log('✅ Analysis complete!');
-        const targetPlayerId = results.target_permanent_id || results.target_player_id;
-        console.log(`   Target player: Permanent ID ${targetPlayerId}`);
-        console.log(`   Decision points: ${results.decision_points?.length || 0}`);
-        
-        if (results.player_analytics) {
-          console.log(`   Distance traveled: ${results.player_analytics.distance_traveled}px`);
-          console.log(`   Average speed: ${results.player_analytics.average_speed} px/s`);
-        }
-        
-        // Store completed results
-        analysisJobs.set(jobId, {
-          status: 'completed',
-          progress: 100,
-          message: 'Analysis complete!',
-          results: {
-            ...results,
-            video_url: videoUrl,
-            video_filename: req.file.filename
-          },
-          startTime: analysisJobs.get(jobId).startTime
-        });
-        
-      } catch (fetchError) {
-        clearTimeout(timeoutId);
-        
-        if (fetchError.name === 'AbortError') {
-          throw new Error('Analysis timeout (2 hours). Video may be too long.');
-        }
-        
-        throw fetchError;
-      }
-      
-    } catch (error) {
-      console.error('❌ Analysis error:', error);
-      
-      // Store error status
-      analysisJobs.set(jobId, {
-        status: 'failed',
-        progress: 0,
-        message: error.message || 'Analysis failed',
-        error: error.message,
-        startTime: analysisJobs.get(jobId)?.startTime || Date.now()
-      });
-      
-      // Clean up temp file
-      if (req.file?.path) {
-        fs.unlink(req.file.path, (err) => {
-          if (err) console.error('Failed to delete temp file:', err);
-        });
-      }
+  const cleanupTimer = setTimeout(() => {
+    fs.unlink(req.file.path, (err) => {
+      if (err) console.error('Delayed cleanup failed:', err);
+      else console.log(`Cleaned up: ${req.file.filename}`);
+    });
+  }, 30 * 60 * 1000);
+
+  try {
+    const payload = {
+      video_url:       videoUrl,
+      click_x:         clickXNum,
+      click_y:         clickYNum,
+      click_timestamp: clickTs,
+      output_video:    false,
+      player_name:     playerName   || null,
+      jersey_number:   jerseyNumber ? parseInt(jerseyNumber) : null,
+      jersey_color:    jerseyColor  || null,
+    };
+
+    console.log('Sending to Modal tracker...');
+    const modalResponse = await fetch(MODAL_ENDPOINT, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+      signal:  AbortSignal.timeout(600_000),
+    });
+
+    clearTimeout(cleanupTimer);
+    fs.unlink(req.file.path, (err) => {
+      if (err) console.error('Failed to delete temp file:', err);
+    });
+
+    if (!modalResponse.ok) {
+      const errText = await modalResponse.text();
+      console.error('Modal error:', modalResponse.status, errText);
+      return res.status(500).json({ error: 'Analysis failed', details: errText });
     }
-  })();
-});
 
-// ============================================
-// ANALYSIS STATUS ENDPOINT
-// ============================================
-app.get('/api/analyze-status/:jobId', (req, res) => {
-  const { jobId } = req.params;
-  const job = analysisJobs.get(jobId);
-  
-  if (!job) {
-    return res.status(404).json({ error: 'Job not found' });
-  }
-  
-  // Calculate elapsed time
-  const elapsedSeconds = Math.floor((Date.now() - job.startTime) / 1000);
-  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
-  const remainingSeconds = elapsedSeconds % 60;
-  
-  res.json({
-    ...job,
-    elapsed: `${elapsedMinutes}m ${remainingSeconds}s`
-  });
-  
-  // Clean up completed/failed jobs after 5 minutes
-  if (job.status === 'completed' || job.status === 'failed') {
-    setTimeout(() => {
-      analysisJobs.delete(jobId);
-    }, 300000);
+    const results = await modalResponse.json();
+    console.log('Analysis complete:', results.decision_points?.length || 0, 'decision points');
+
+    res.json(results);
+
+  } catch (error) {
+    clearTimeout(cleanupTimer);
+    console.error('Analysis error:', error);
+    res.status(500).json({ error: 'Analysis failed', message: error.message });
   }
 });
 
@@ -1537,7 +1441,7 @@ app.listen(PORT, () => {
   console.log(`🚀 PitchMind Backend v4.2 - Manual Tagging + Long Video Support`);
   console.log(`   Port: ${PORT}`);
   console.log(`   Database: ${DATABASE_URL ? '✅ Connected' : '❌ Not configured'}`);
-  console.log(`   Modal: ${MODAL_WEBHOOK_URL ? '✅ Configured' : '❌ Not configured'}`);
+  console.log(`   Modal: ${MODAL_ENDPOINT ? '✅ Configured' : '❌ Not configured'}`);
   console.log(`   Stripe: ${process.env.STRIPE_SECRET_KEY ? '✅ Configured' : '❌ Not configured'}`);
   console.log(`========================================`);
 });

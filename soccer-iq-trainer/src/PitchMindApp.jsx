@@ -630,11 +630,251 @@ export default function PitchMindApp() {
   const videoRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  useEffect(() => { saveToStorage('players', user?.id, players); }, [players]);
-  useEffect(() => { saveToStorage('videos', user?.id, videos); }, [videos]);
-  useEffect(() => { saveToStorage('sessions', user?.id, sessions); }, [sessions]);
-  useEffect(() => { saveToStorage('reports', user?.id, reports); }, [reports]);
-  useEffect(() => { saveToStorage('chat_history', user?.id, chatHistory); }, [chatHistory]);
+  // Sync data from database on mount
+  useEffect(() => {
+    if (user?.id && !dataSynced) {
+      syncDataFromDB(false);
+    }
+  }, [user?.id, dataSynced]);
+
+  const syncDataFromDB = async (forceRefresh = false) => {
+    if (!user?.id) return;
+    if (!forceRefresh && dataSynced) return; // Skip if already synced unless forced
+    
+    setDataLoading(true);
+    try {
+      const data = await apiCall('/api/sync', user.id);
+      setUserProfile(data.user);
+      setTeams(data.teams?.map(t => ({
+        ...t,
+        divisionName: t.division_name,
+        seasonName: t.season_name,
+        jerseyColor: t.jersey_color,
+        teamsnapId: t.teamsnap_id
+      })) || []);
+      setPlayers(data.players?.map(p => ({
+        ...p,
+        teamId: p.team_id,
+        teamName: p.team_name,
+        jerseyNumber: p.jersey_number,
+        jerseyColor: p.jersey_color,
+        teamsnapId: p.teamsnap_id,
+        importedFrom: p.imported_from,
+        analyses: []
+      })) || []);
+      setSessions(data.sessions?.map(s => ({
+        ...s,
+        drills: typeof s.drills === 'string' ? JSON.parse(s.drills) : s.drills
+      })) || []);
+      setChatHistory(data.chatHistory || []);
+      setDataSynced(true);
+      console.log('✅ Data synced from database:', data.teams?.length, 'teams,', data.players?.length, 'players');
+    } catch (err) {
+      console.error('Sync error, falling back to localStorage:', err);
+      // Fallback to localStorage if DB fails
+      setPlayers(loadFromStorage(STORAGE_KEYS.PLAYERS, []));
+      setTeams(loadFromStorage(STORAGE_KEYS.TEAMS, []));
+      setSessions(loadFromStorage(STORAGE_KEYS.SESSIONS, []));
+      setChatHistory(loadFromStorage(STORAGE_KEYS.CHAT_HISTORY, []));
+    }
+    setDataLoading(false);
+  };
+
+  // Save to localStorage as backup
+  useEffect(() => { saveToStorage(STORAGE_KEYS.PLAYERS, players); }, [players]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.TEAMS, teams); }, [teams]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.VIDEOS, videos); }, [videos]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.SESSIONS, sessions); }, [sessions]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.REPORTS, reports); }, [reports]);
+  useEffect(() => { saveToStorage(STORAGE_KEYS.CHAT_HISTORY, chatHistory); }, [chatHistory]);
+
+  // TeamSnap OAuth callback handler
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('teamsnap_token');
+    const error = params.get('teamsnap_error');
+    
+    if (token) {
+      setTeamsnapToken(token);
+      localStorage.setItem('teamsnap_token', token);
+      window.history.replaceState({}, '', window.location.pathname);
+      setShowModal('teamsnapImport');
+    }
+    
+    if (error) {
+      console.error('TeamSnap error:', error);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
+  // TeamSnap functions
+  const connectTeamSnap = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/teamsnap/auth`);
+      const data = await response.json();
+      if (data.authUrl) {
+        window.location.href = data.authUrl;
+      } else {
+        alert('TeamSnap integration not configured. Add credentials to backend.');
+      }
+    } catch (err) {
+      console.error('TeamSnap auth error:', err);
+    }
+  };
+
+  const fetchTeamsnapTeams = async () => {
+    if (!teamsnapToken) return;
+    setTeamsnapLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/teamsnap/teams`, {
+        headers: { 'Authorization': `Bearer ${teamsnapToken}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setTeamsnapTeams(data.teams || []);
+      } else if (response.status === 401) {
+        localStorage.removeItem('teamsnap_token');
+        setTeamsnapToken(null);
+      }
+    } catch (err) {
+      console.error('Failed to fetch teams:', err);
+    }
+    setTeamsnapLoading(false);
+  };
+
+  const fetchTeamsnapRoster = async (teamId) => {
+    if (!teamsnapToken) return [];
+    try {
+      const response = await fetch(`${API_BASE}/api/teamsnap/roster/${teamId}`, {
+        headers: { 'Authorization': `Bearer ${teamsnapToken}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return data.players || [];
+      }
+    } catch (err) {
+      console.error('Failed to fetch roster:', err);
+    }
+    return [];
+  };
+
+  const importTeamsnapPlayers = async (teamsnapPlayers, selectedIds, teamInfo) => {
+    const toImport = teamsnapPlayers.filter(p => selectedIds.includes(p.id));
+    
+    // First create team in DB if needed
+    let dbTeam = null;
+    if (teamInfo && user?.id) {
+      try {
+        // Check if team already exists by teamsnap ID
+        const existingTeam = teams.find(t => 
+          String(t.teamsnap_id) === String(teamInfo.id) || 
+          String(t.teamsnapId) === String(teamInfo.id)
+        );
+        
+        if (!existingTeam) {
+          dbTeam = await apiCall('/api/teams', user.id, {
+            method: 'POST',
+            body: JSON.stringify({
+              name: teamInfo.name,
+              divisionName: teamInfo.divisionName,
+              seasonName: teamInfo.seasonName,
+              teamsnapId: String(teamInfo.id),
+              source: 'teamsnap'
+            })
+          });
+          console.log('Created team in DB:', dbTeam);
+        } else {
+          dbTeam = existingTeam;
+          console.log('Using existing team:', dbTeam);
+        }
+      } catch (err) {
+        console.error('Failed to create team in DB:', err);
+      }
+    }
+    
+    const dbTeamId = dbTeam?.id || null;
+    
+    // Format players for DB
+    const playersToCreate = toImport.map(p => ({
+      name: p.name,
+      position: mapTeamsnapPosition(p.position),
+      age: p.birthday ? calculateTeamsnapAge(p.birthday) : 0,
+      jerseyNumber: p.jerseyNumber,
+      jerseyColor: '#10b981',
+      teamsnapId: String(p.id),
+      importedFrom: 'teamsnap',
+      teamId: dbTeamId
+    }));
+    
+    // Save to database
+    let importedCount = 0;
+    if (user?.id && dbTeamId) {
+      try {
+        const result = await apiCall('/api/players/bulk', user.id, {
+          method: 'POST',
+          body: JSON.stringify({ players: playersToCreate, teamId: dbTeamId })
+        });
+        importedCount = result.count || 0;
+        console.log('Imported players to DB:', importedCount);
+        
+        // Re-sync all data from database to get proper IDs and relationships
+        await syncDataFromDB(true);
+        
+      } catch (err) {
+        console.error('Failed to save players to DB:', err);
+      }
+    } else {
+      // Fallback to local storage if no DB
+      const newPlayers = playersToCreate.map(p => ({
+        ...p,
+        id: Date.now() + Math.random(),
+        rating: 70,
+        trend: 'same',
+        teamName: teamInfo?.name || 'Unassigned',
+        analyses: []
+      }));
+      
+      // Add team locally if not exists
+      if (teamInfo && !teams.find(t => t.id === teamInfo.id)) {
+        setTeams([...teams, {
+          id: teamInfo.id,
+          name: teamInfo.name,
+          divisionName: teamInfo.divisionName,
+          seasonName: teamInfo.seasonName,
+          source: 'teamsnap'
+        }]);
+      }
+      
+      setPlayers([...players, ...newPlayers]);
+      importedCount = newPlayers.length;
+    }
+    
+    return importedCount;
+  };
+
+  const mapTeamsnapPosition = (pos) => {
+    if (!pos) return 'Midfielder';
+    const p = pos.toLowerCase();
+    if (p.includes('goal') || p.includes('keeper')) return 'Goalkeeper';
+    if (p.includes('def') || p.includes('back')) return 'Defender';
+    if (p.includes('forward') || p.includes('striker') || p.includes('wing')) return 'Forward';
+    return 'Midfielder';
+  };
+
+  const calculateTeamsnapAge = (birthday) => {
+    if (!birthday) return 0;
+    const birth = new Date(birthday);
+    const today = new Date();
+    let age = today.getFullYear() - birth.getFullYear();
+    if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age--;
+    return age > 0 ? age : 0;
+  };
+
+  const disconnectTeamSnap = () => {
+    localStorage.removeItem('teamsnap_token');
+    setTeamsnapToken(null);
+    setTeamsnapTeams([]);
+  };
 
   useEffect(() => { return () => { if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current); }; }, []);
 
@@ -1349,8 +1589,9 @@ export default function PitchMindApp() {
     if (uploadState !== 'selecting') return;
     const video = videoRef.current;
     const rect = video.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * video.videoWidth;
-    const y = ((e.clientY - rect.top) / rect.height) * video.videoHeight;
+    // Send percentages (0-100) so the GPU tracker can map to any resolution
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
     setClickPosition({ x, y, timestamp: video.currentTime, displayX: e.clientX - rect.left, displayY: e.clientY - rect.top });
   };
   
@@ -1375,12 +1616,13 @@ export default function PitchMindApp() {
     try {
       const formData = new FormData();
       formData.append('video', videoFile);
-      formData.append('clickX', Math.round(clickPosition.x));
-      formData.append('clickY', Math.round(clickPosition.y));
+      formData.append('clickX', clickPosition.x.toFixed(2));
+      formData.append('clickY', clickPosition.y.toFixed(2));
       formData.append('clickTimestamp', clickPosition.timestamp || 0);
       if (trackedPlayer) {
         formData.append('playerName', trackedPlayer.name);
         formData.append('jerseyNumber', trackedPlayer.jerseyNumber || '');
+        formData.append('jerseyColor', trackedPlayer.jerseyColor || '');
       }
 
       // Submit job — backend returns jobId immediately

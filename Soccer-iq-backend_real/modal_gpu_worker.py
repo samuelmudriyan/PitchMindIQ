@@ -443,8 +443,21 @@ def track_player_gpu(
         
         print(f"Video: {width}x{height}, {fps:.1f} fps, {total_frames} frames ({duration:.1f}s)")
         
-        player_pixel_x = int(player_x)
-        player_pixel_y = int(player_y)
+        # Convert click coordinates from percentage (0-100) to pixels
+        # Frontend sends coordinates as percentages (0-100), where:
+        # - (0, 0) = top-left corner
+        # - (100, 100) = bottom-right corner
+        # - (50, 50) = center of video
+        if player_x <= 100.0 and player_y <= 100.0:
+            # Values are percentages - convert to pixels
+            player_pixel_x = int((player_x / 100.0) * width)
+            player_pixel_y = int((player_y / 100.0) * height)
+            print(f"📍 Converted click coordinates: ({player_x:.1f}%, {player_y:.1f}%) -> ({player_pixel_x}px, {player_pixel_y}px)")
+        else:
+            # Values are already in pixels (backward compatibility)
+            player_pixel_x = int(player_x)
+            player_pixel_y = int(player_y)
+            print(f"📍 Using click coordinates as pixels: ({player_pixel_x}px, {player_pixel_y}px)")
         
         # ============================================
         # PHASE 1: Detection & Tracking

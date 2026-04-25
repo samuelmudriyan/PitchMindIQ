@@ -296,10 +296,13 @@ def get_sample_rate(total_frames, fps):
 )
 def track_player(
     video_url: str,
-    click_x: float,          # percentage 0–100
-    click_y: float,          # percentage 0–100
+    click_x: float,              # percentage 0–100
+    click_y: float,              # percentage 0–100
     click_timestamp: float = 0.0,
     output_video: bool = True,
+    jersey_color: Optional[str] = None,   # hex e.g. "#ef4444"
+    jersey_number: Optional[int] = None,
+    player_name: Optional[str] = None,
 ) -> Dict:
     import cv2, tempfile, os, sys, urllib.request
     import torch
@@ -508,20 +511,74 @@ def track_player(
     # ── PHASE 2: Identify clicked player ─────────────────────────────────────
     print("[tracker] Phase 2: Identifying clicked player...", file=sys.stderr)
 
+    # Parse jersey color hint into BGR for OpenCV comparison
+    def hex_to_bgr(hex_str):
+        """Convert hex color '#rrggbb' → (B, G, R) numpy array."""
+        h = hex_str.lstrip('#')
+        if len(h) != 6:
+            return None
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return np.array([b, g, r], dtype=np.float32)
+
+    def jersey_color_score(frame, box, target_bgr, threshold=60):
+        """
+        Compare dominant color of player crop to target jersey color.
+        Returns 0.0–1.0 (1.0 = perfect match).
+        """
+        if target_bgr is None:
+            return 0.5  # neutral when no hint given
+        x1, y1, x2, y2 = [max(0, int(v)) for v in box]
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0:
+            return 0.5
+        # Sample center strip of the crop (torso area)
+        ch, cw = crop.shape[:2]
+        torso = crop[ch//4 : 3*ch//4, cw//4 : 3*cw//4]
+        if torso.size == 0:
+            torso = crop
+        mean_color = torso.reshape(-1, 3).mean(axis=0)
+        dist = float(np.linalg.norm(mean_color - target_bgr))
+        return max(0.0, 1.0 - dist / threshold)
+
+    target_bgr = hex_to_bgr(jersey_color) if jersey_color else None
+    if target_bgr is not None:
+        print(f"[tracker] Jersey color hint: {jersey_color} → BGR {target_bgr}", file=sys.stderr)
+
+    # Find the frame closest to click_timestamp for color sampling
     click_sample_idx = int((click_timestamp * fps) / sample_rate)
     search_start     = max(0, click_sample_idx - 20)
     search_end       = min(len(sampled_players), click_sample_idx + 20)
+
+    # Re-open video to sample the click frame for color scoring
+    cap_check = cv2.VideoCapture(video_path)
+    click_frame_img = None
+    if cap_check.isOpened():
+        target_frame_num = max(1, click_sample_idx * sample_rate)
+        cap_check.set(cv2.CAP_PROP_POS_FRAMES, target_frame_num - 1)
+        ret_c, click_frame_img = cap_check.read()
+        cap_check.release()
 
     candidates = []
     for fi, frame_players in enumerate(sampled_players[search_start:search_end]):
         for pid, pdata in frame_players.items():
             cx, cy = pdata["center"]
-            dist = np.hypot(cx - click_x_px, cy - click_y_px)
+            dist        = np.hypot(cx - click_x_px, cy - click_y_px)
             time_prox   = 1.0 - abs(fi - (click_sample_idx - search_start)) / 20.0
             dist_score  = max(0.0, 1.0 - dist / MAX_CLICK_DISTANCE)
             det_conf    = pdata.get("confidence", 1.0)
-            score       = dist_score * 0.5 + time_prox * 0.3 + det_conf * 0.2
-            candidates.append({"pid": pid, "dist": dist, "score": score})
+
+            # Jersey color score (only at frames near click time for speed)
+            color_score = 0.5
+            if click_frame_img is not None and abs(fi - (click_sample_idx - search_start)) <= 3:
+                color_score = jersey_color_score(click_frame_img, pdata["box"], target_bgr)
+
+            # Weighted composite: distance is most important, then time, color, detection conf
+            if target_bgr is not None:
+                score = dist_score * 0.45 + time_prox * 0.25 + color_score * 0.20 + det_conf * 0.10
+            else:
+                score = dist_score * 0.50 + time_prox * 0.30 + det_conf * 0.20
+
+            candidates.append({"pid": pid, "dist": dist, "score": score, "color_score": color_score})
 
     if not candidates:
         return {"success": False, "error": "Could not find any players near click position."}
@@ -532,7 +589,7 @@ def track_player(
 
     target_pid  = best["pid"]
     id_conf     = round(best["score"], 2)
-    print(f"[tracker] Target permanent ID: {target_pid} (score={id_conf})", file=sys.stderr)
+    print(f"[tracker] Target permanent ID: {target_pid} (score={id_conf}, color={best['color_score']:.2f})", file=sys.stderr)
 
     # ── PHASE 3: Ball interpolation + Kalman smoothing ───────────────────────
     print("[tracker] Phase 3: Ball smoothing...", file=sys.stderr)
@@ -694,6 +751,9 @@ def track_player(
             "total_touches":            len(decision_points),
             "action_breakdown":         action_counts,
             "identification_confidence": id_conf,
+            "jersey_color_used":        jersey_color,
+            "jersey_number":            jersey_number,
+            "player_name":              player_name,
         },
         "trajectory": {
             "positions":   [[float(p[0]), float(p[1])] if not np.isnan(p).any() else None for p in trajectory],
@@ -742,14 +802,19 @@ def track_webhook():
         click_x         = float(data.get("click_x", 50.0))
         click_y         = float(data.get("click_y", 50.0))
         click_timestamp = float(data.get("click_timestamp", 0.0))
-        output_video    = bool(data.get("output_video", False))  # opt-in — large payload
+        output_video    = bool(data.get("output_video", False))
+        jersey_color    = data.get("jersey_color", None)   # hex string e.g. "#ef4444"
+        jersey_number   = data.get("jersey_number", None)  # int or None
+        player_name     = data.get("player_name", None)
 
         if not video_url:
             return JSONResponse({"success": False, "error": "Missing video_url"}, status_code=400)
 
         try:
-            result = track_player.remote(video_url, click_x, click_y, click_timestamp, output_video)
-            # Don't ship raw video bytes over JSON unless explicitly requested
+            result = track_player.remote(
+                video_url, click_x, click_y, click_timestamp, output_video,
+                jersey_color, jersey_number, player_name
+            )
             if not output_video:
                 result.pop("annotated_video_bytes", None)
             return JSONResponse(result)
