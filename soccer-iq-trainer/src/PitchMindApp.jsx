@@ -890,6 +890,13 @@ export default function PitchMindApp() {
 
   useEffect(() => { return () => { if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current); }; }, []);
 
+  // Restore video position after UploadPage remounts (caused by component defined inside PitchMindApp)
+  useEffect(() => {
+    if (clickPosition?.timestamp != null && videoRef.current) {
+      videoRef.current.currentTime = clickPosition.timestamp;
+    }
+  }, [clickPosition]);
+
   const playClip = useCallback((startSeconds, index) => {
     if (!videoRef.current) return;
     if (clipTimeoutRef.current) clearTimeout(clipTimeoutRef.current);
@@ -1595,16 +1602,20 @@ export default function PitchMindApp() {
     setError(null);
     try {
       let fileToUpload = videoFile;
+      const originalTimestamp = clickPosition.timestamp || 0;
+      let adjustedTimestamp = originalTimestamp;
       if (videoFile.size > 50 * 1024 * 1024) {
         setUploadState('trimming');
-        fileToUpload = await trimVideoForUpload(videoFile, clickPosition.timestamp || 0);
+        const trimStart = Math.max(0, originalTimestamp - 15);
+        fileToUpload = await trimVideoForUpload(videoFile, originalTimestamp);
+        adjustedTimestamp = originalTimestamp - trimStart;
         setUploadState('uploading');
       }
       const formData = new FormData();
       formData.append('video', fileToUpload);
       formData.append('clickX', clickPosition.x.toFixed(2));
       formData.append('clickY', clickPosition.y.toFixed(2));
-      formData.append('clickTimestamp', clickPosition.timestamp || 0);
+      formData.append('clickTimestamp', adjustedTimestamp);
       if (trackedPlayer) {
         formData.append('playerName', trackedPlayer.name);
         formData.append('jerseyNumber', trackedPlayer.jerseyNumber || '');
