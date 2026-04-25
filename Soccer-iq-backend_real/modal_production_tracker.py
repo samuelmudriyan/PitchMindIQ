@@ -41,21 +41,29 @@ gpu_image = (
     )
 )
 
-COACHING_PROMPT_TEMPLATE = """You are an elite soccer coach reviewing match footage.
+COACHING_PROMPT_TEMPLATE = """You are an elite soccer coach analyzing broadcast match footage.
 Player being analyzed: {player_label}.
 
-Look at this frame from a soccer match and identify if a meaningful soccer action or decision moment is happening involving this player.
+This is a cropped frame from a match. The target player is somewhere in this image (likely near center).
+
+YOUR TASK: Determine if the ball is near or being played by/to this player. If so, analyze the decision.
+
+Look for:
+- The ball (round object, often white/yellow/black)
+- Whether the ball is within 2-3 meters of the target player
+- What decision or action the player makes (or should make)
 
 Respond ONLY with valid JSON (no markdown, no extra text):
 {{
   "action": "receive" | "pass" | "shot" | "dribble" | "pressure" | "run" | "header" | "none",
-  "description": "one sentence describing what is happening in this moment",
-  "coaching": "one sentence of specific, actionable coaching feedback for this player",
+  "description": "one sentence describing what is happening — include ball position relative to player",
+  "coaching": "one sentence of elite-level coaching feedback based on professional standards for this position",
   "rating": 1 | 2 | 3 | 4 | 5
 }}
 
 Rating guide: 1=poor decision/execution, 3=average, 5=excellent.
-Use "none" only if the player is clearly not involved in any action in this frame."""
+Use "none" ONLY if the ball is clearly not near this player in this frame.
+If you can see the ball anywhere near the player, always classify the action."""
 
 
 @app.function(
@@ -173,15 +181,36 @@ def track_player(
         click_x_px = (click_x / 100) * width
         click_y_px = (click_y / 100) * height
 
+        def sample_jersey_color(bbox, roi):
+            """Sample the dominant hue/saturation from the jersey area of a bounding box."""
+            bx1, by1, bx2, by2 = [int(v) for v in bbox]
+            crop = roi[by1:by2, bx1:bx2]
+            if crop.size == 0:
+                return None, None
+            h, w = crop.shape[:2]
+            jersey = crop[int(h * 0.15):int(h * 0.65), int(w * 0.1):int(w * 0.9)]
+            if jersey.size == 0:
+                return None, None
+            hsv = cv2.cvtColor(jersey, cv2.COLOR_BGR2HSV)
+            return float(np.mean(hsv[:, :, 0])), float(np.mean(hsv[:, :, 1]))
+
+        def hue_dist(h1, h2):
+            d = abs(h1 - h2)
+            return min(d, 180 - d)
+
         # State
         target_player_id = None
+        target_hue_mean = None
+        target_sat_mean = None
+        last_seen_time = -999.0
+        last_reacquire_time = -999.0
         player_tracks = []
         frames_for_claude = []   # list of (timestamp, cropped_frame)
         prev_hist = None
         frame_idx = 0
         last_progress = 0
         last_capture_time = -999.0
-        CAPTURE_INTERVAL = 1.0   # capture 1 frame per second of tracked time
+        CAPTURE_INTERVAL = 1.5   # capture ~1 frame per 1.5s of tracked time
         MAX_FRAMES = 40          # cap to keep latency/cost bounded
         debug_frame_b64 = None   # annotated full frame near click timestamp
 
@@ -239,6 +268,7 @@ def track_player(
                 if current_time >= click_timestamp and current_time <= click_timestamp + LOCK_ON_WINDOW:
                     min_dist = float('inf')
                     best_id = None
+                    best_bbox = None
                     for i in range(len(tracks)):
                         bbox = tracks.xyxy[i]
                         cx = (bbox[0] + bbox[2]) / 2
@@ -250,9 +280,13 @@ def track_player(
                         if dist < min_dist:
                             min_dist = dist
                             best_id = int(tracks.tracker_id[i])
+                            best_bbox = bbox
                     if best_id is not None:
                         target_player_id = best_id
-                        print(f"Player locked: ID {target_player_id} (dist={min_dist:.0f}px @ {current_time:.1f}s)", file=sys.stderr)
+                        last_seen_time = current_time
+                        # Sample jersey color for camera-cut re-identification
+                        target_hue_mean, target_sat_mean = sample_jersey_color(best_bbox, roi)
+                        print(f"Player locked: ID {target_player_id} (dist={min_dist:.0f}px @ {current_time:.1f}s, hue={target_hue_mean:.0f})", file=sys.stderr)
 
                         # Save annotated debug frame showing ALL detections + click point
                         if debug_frame_b64 is None:
@@ -279,11 +313,14 @@ def track_player(
                             debug_frame_b64 = base64.b64encode(buf.tobytes()).decode('utf-8')
 
             # Track target player and capture frames for Claude
+            target_found_this_frame = False
             if len(tracks) > 0:
                 for i in range(len(tracks)):
                     if int(tracks.tracker_id[i]) != target_player_id:
                         continue
 
+                    target_found_this_frame = True
+                    last_seen_time = current_time
                     bbox = tracks.xyxy[i]
                     cx = (bbox[0] + bbox[2]) / 2
                     cy = (bbox[1] + bbox[3]) / 2
@@ -295,13 +332,13 @@ def track_player(
                         'bbox': [float(x) for x in bbox]
                     })
 
-                    # Capture frame for Claude (rate-limited, capped)
+                    # Capture frame for Claude — wide crop so ball & context are visible
                     if (current_time - last_capture_time >= CAPTURE_INTERVAL
                             and len(frames_for_claude) < MAX_FRAMES):
-                        # Expand bbox by 1.5x for context, stay within ROI
                         bx1, by1, bx2, by2 = bbox
-                        pad_x = (bx2 - bx1) * 0.5
-                        pad_y = (by2 - by1) * 0.5
+                        # 3x expansion so Claude can see ball and nearby players
+                        pad_x = (bx2 - bx1) * 1.5
+                        pad_y = (by2 - by1) * 1.5
                         x1 = max(0, int(bx1 - pad_x))
                         y1 = max(0, int(by1 - pad_y))
                         x2 = min(roi.shape[1], int(bx2 + pad_x))
@@ -310,6 +347,33 @@ def track_player(
                         if crop.size > 0:
                             frames_for_claude.append((round(current_time, 2), crop.copy()))
                             last_capture_time = current_time
+
+            # Jersey-color re-identification after camera cuts
+            # ByteTrack loses the target ID on every camera cut; re-acquire by matching jersey color
+            if (target_player_id is not None
+                    and not target_found_this_frame
+                    and target_hue_mean is not None
+                    and (current_time - last_seen_time) >= 0.5
+                    and (current_time - last_reacquire_time) >= 1.0
+                    and len(tracks) > 0):
+                best_match_id = None
+                best_score = float('inf')
+                for i in range(len(tracks)):
+                    h, s = sample_jersey_color(tracks.xyxy[i], roi)
+                    if h is None:
+                        continue
+                    hd = hue_dist(h, target_hue_mean)
+                    sd = abs(s - (target_sat_mean or 0))
+                    if hd < 30:
+                        score = hd + sd * 0.3
+                        if score < best_score:
+                            best_score = score
+                            best_match_id = int(tracks.tracker_id[i])
+                if best_match_id is not None:
+                    target_player_id = best_match_id
+                    last_seen_time = current_time
+                    last_reacquire_time = current_time
+                    print(f"Re-identified by jersey color: ID {target_player_id} @ {current_time:.1f}s", file=sys.stderr)
 
             frame_idx += 1
 
