@@ -923,69 +923,6 @@ export default function PitchMindApp() {
     }));
   };
 
-
-  // ── TeamSnap Functions ────────────────────────────────────────────────────
-  const connectTeamSnap = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/teamsnap/auth`);
-      const data = await res.json();
-      if (data.authUrl) window.location.href = data.authUrl;
-      else alert('TeamSnap not configured on backend.');
-    } catch(err) { console.error('TeamSnap auth error:', err); }
-  };
-
-  const fetchTeamsnapTeams = async () => {
-    if (!teamsnapToken) return;
-    setTeamsnapLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/teamsnap/teams`, { headers: { 'Authorization': `Bearer ${teamsnapToken}` } });
-      if (res.ok) { const data = await res.json(); setTeamsnapTeams(data.teams||[]); }
-      else if (res.status===401) { localStorage.removeItem('teamsnap_token'); setTeamsnapToken(null); }
-    } catch(err) { console.error('Failed to fetch teams:', err); }
-    setTeamsnapLoading(false);
-  };
-
-  const fetchTeamsnapRoster = async (teamId) => {
-    if (!teamsnapToken) return [];
-    try {
-      const res = await fetch(`${API_BASE}/api/teamsnap/roster/${teamId}`, { headers: { 'Authorization': `Bearer ${teamsnapToken}` } });
-      if (res.ok) { const data = await res.json(); return data.players||[]; }
-    } catch(err) { console.error('Failed to fetch roster:', err); }
-    return [];
-  };
-
-  const mapTeamsnapPosition = (pos) => {
-    if (!pos) return 'Midfielder';
-    const p = pos.toLowerCase();
-    if (p.includes('goal')||p.includes('keeper')) return 'Goalkeeper';
-    if (p.includes('def')||p.includes('back')) return 'Defender';
-    if (p.includes('forward')||p.includes('striker')||p.includes('wing')) return 'Forward';
-    return 'Midfielder';
-  };
-
-  const importTeamsnapPlayers = async (teamsnapPlayers, selectedIds, teamInfo) => {
-    const toImport = teamsnapPlayers.filter(p => selectedIds.includes(p.id));
-    const existingIds = players.filter(p=>p.teamsnapId).map(p=>String(p.teamsnapId));
-    const newPlayers = toImport.filter(p=>!existingIds.includes(String(p.id))).map(p => ({
-      id: Date.now()+Math.random(), name: p.name, position: mapTeamsnapPosition(p.position),
-      age: 0, jerseyNumber: p.jerseyNumber, jerseyColor: '#10b981', rating: 70, trend: 'same',
-      teamsnapId: String(p.id), importedFrom: 'teamsnap', teamName: teamInfo?.name, analyses: []
-    }));
-    if (newPlayers.length > 0) setPlayers(prev => [...prev, ...newPlayers]);
-    return newPlayers.length;
-  };
-
-  const disconnectTeamSnap = () => { localStorage.removeItem('teamsnap_token'); setTeamsnapToken(null); setTeamsnapTeams([]); };
-
-  // TeamSnap OAuth callback
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get('teamsnap_token');
-    const err = params.get('teamsnap_error');
-    if (token) { setTeamsnapToken(token); localStorage.setItem('teamsnap_token', token); window.history.replaceState({}, '', window.location.pathname); setShowModal('teamsnapImport'); }
-    if (err) { window.history.replaceState({}, '', window.location.pathname); }
-  }, []);
-
   const handleExportReport = async () => {
     try {
       await generatePDFReport(analysisResults, videoFile?.name, players, user?.firstName, trackedPlayer);
