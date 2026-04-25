@@ -639,6 +639,7 @@ export default function PitchMindApp() {
   const fileInputRef = useRef(null);
   const ffmpegRef = useRef(null);
   const ffmpegLoaded = useRef(false);
+  const targetSeekTimeRef = useRef(null);
   const [trimStatus, setTrimStatus] = useState('');
   const [gameClips, setGameClips] = useState(() => loadFromStorage('gameClips', user?.id, []));
 
@@ -1545,10 +1546,11 @@ export default function PitchMindApp() {
     if (uploadState !== 'selecting') return;
     const video = videoRef.current;
     const rect = video.getBoundingClientRect();
-    // Send percentages (0-100) so the GPU tracker can map to any resolution
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
-    setClickPosition({ x, y, timestamp: video.currentTime, displayX: e.clientX - rect.left, displayY: e.clientY - rect.top });
+    const ts = video.currentTime;
+    targetSeekTimeRef.current = ts;  // persist before rerender causes remount
+    setClickPosition({ x, y, timestamp: ts, displayX: e.clientX - rect.left, displayY: e.clientY - rect.top });
   };
   
   const resetUpload = () => {
@@ -1711,7 +1713,7 @@ export default function PitchMindApp() {
                   <button onClick={() => setShowModal('selectPlayer')} className="text-gray-400 hover:text-white text-sm">Change player</button>
                 </div>
               </div>
-              <div className="relative bg-black"><video ref={videoRef} src={videoUrl} className="w-full cursor-crosshair" controls onClick={handleVideoClick} />{clickPosition && <div className="absolute w-14 h-14 border-4 border-emerald-400 rounded-full animate-pulse pointer-events-none" style={{ left: clickPosition.displayX - 28, top: clickPosition.displayY - 28 }}><div className="absolute inset-2 bg-emerald-400/30 rounded-full" /></div>}</div>
+              <div className="relative bg-black"><video ref={videoRef} src={videoUrl} className="w-full cursor-crosshair" controls onClick={handleVideoClick} onLoadedMetadata={() => { if (targetSeekTimeRef.current != null && videoRef.current) videoRef.current.currentTime = targetSeekTimeRef.current; }} />{clickPosition && <div className="absolute w-14 h-14 border-4 border-emerald-400 rounded-full animate-pulse pointer-events-none" style={{ left: clickPosition.displayX - 28, top: clickPosition.displayY - 28 }}><div className="absolute inset-2 bg-emerald-400/30 rounded-full" /></div>}</div>
               <div className="p-6 bg-white/5 border-t border-white/10"><div className="flex items-center justify-between"><div>{clickPosition ? <div className="flex items-center space-x-2 text-emerald-400"><CheckCircle className="w-5 h-5" /><span className="font-semibold">Player selected at {formatTime(clickPosition.timestamp)}</span></div> : <div className="flex items-center space-x-2 text-amber-400"><AlertCircle className="w-5 h-5" /><span>Click on {trackedPlayer.name} in the video</span></div>}</div><div className="flex space-x-3"><button onClick={resetUpload} className="px-5 py-2.5 border border-white/20 text-gray-300 rounded-xl font-medium hover:bg-white/5">Cancel</button><button onClick={startAnalysis} disabled={!clickPosition} className={`px-6 py-2.5 rounded-xl font-semibold flex items-center space-x-2 ${clickPosition ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-lg' : 'bg-white/10 text-gray-500 cursor-not-allowed'}`}><Brain className="w-5 h-5" /><span>Start Analysis</span></button></div></div>{error && <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 flex items-center space-x-2"><AlertCircle className="w-5 h-5" /><span>{error}</span></div>}</div>
             </div>
           )}
