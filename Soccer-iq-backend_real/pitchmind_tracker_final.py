@@ -315,12 +315,38 @@ def track_player(
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"[tracker] Device: {device}", file=sys.stderr)
 
-    # ── Download video ────────────────────────────────────────────────────────
+    # ── Download video (chunked + resumable for large files) ─────────────────
     print(f"[tracker] Downloading: {video_url}", file=sys.stderr)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as f:
-        urllib.request.urlretrieve(video_url, f.name)
-        video_path = f.name
-    print(f"[tracker] Downloaded", file=sys.stderr)
+    import time as _time
+    import requests as _requests
+
+    def _download(url, dest, max_retries=5, chunk_mb=8):
+        chunk = chunk_mb * 1024 * 1024
+        downloaded = 0
+        for attempt in range(max_retries):
+            try:
+                headers = {"Range": f"bytes={downloaded}-"} if downloaded else {}
+                with _requests.get(url, headers=headers, stream=True, timeout=300) as r:
+                    r.raise_for_status()
+                    mode = "ab" if downloaded else "wb"
+                    with open(dest, mode) as fh:
+                        for block in r.iter_content(chunk_size=chunk):
+                            if block:
+                                fh.write(block)
+                                downloaded += len(block)
+                return
+            except Exception as exc:
+                print(f"[tracker] Download attempt {attempt+1} failed: {exc}", file=sys.stderr)
+                if attempt == max_retries - 1:
+                    raise
+                _time.sleep(2 ** attempt)
+
+    tmp_video = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+    tmp_video.close()
+    video_path = tmp_video.name
+    _download(video_url, video_path)
+    size_mb = os.path.getsize(video_path) / (1024 * 1024)
+    print(f"[tracker] Downloaded {size_mb:.1f} MB", file=sys.stderr)
 
     # ── Load models ───────────────────────────────────────────────────────────
     roboflow_model = get_model(model_id=ROBOFLOW_MODEL_ID)
